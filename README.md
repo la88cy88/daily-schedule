@@ -72,7 +72,7 @@ python -m http.server 8765
 
 # 3) 跑自动化验收（另开一个终端）
 node tests/run-cdp-tests.mjs
-# 重点看：85/85 全部通过、控制台 0 错误；screenshots/daily-bottom.png 中最后一张卡未被 FAB 遮挡
+# 重点看：88/88 全部通过、控制台 0 错误；screenshots/daily-bottom.png 中最后一张卡未被 FAB 遮挡
 ```
 
 ---
@@ -232,16 +232,20 @@ node tests/run-cdp-tests.mjs
 
 | 模块 | 机制 |
 |---|---|
-| **震动** | iOS Safari 不支持 `navigator.vibrate`。Safari 17.4+ 检测到 `<input type="checkbox" switch>` 支持时，为每个目标元素叠加透明 `<label for>`（绝对定位覆盖整卡、`opacity:0`、`z-index:2`）指向离屏隐藏 switch：真实点击由 label 承接 → `preventDefault` 后手动切换 switch → 触发原生 Taptic Engine；事件冒泡到元素自身的点击处理器完成打卡（唯一入口）。桌面/安卓且存在 `navigator.vibrate` 时降级为 `vibrate(10)`（仅在真实用户手势内调用，避免无手势拦截噪音）。其他环境静默 no-op |
+| **震动** | iOS Safari 不支持 `navigator.vibrate`。**彻底放弃程序化触发**（iOS 26.5+ WebKit 要求震动必须来自用户对真实 switch 的直接物理点击，任何 `.click()`/`dispatchEvent()`/在 click 处理器里请求震动都不产生 Taptic）。方案：`attach(el)` 为每个目标元素叠加真实 `<input type="checkbox" switch>`（`position:absolute;width/height:1px;opacity:0;pointer-events:none` 保留在 DOM，不用 `display:none`）+ 透明 `<label for>`（覆盖整卡、`z-index:2`）——label 的物理点击由浏览器**默认行为原生切换 switch** 触发 Taptic，click 事件同时冒泡到父元素，打卡逻辑照常执行；**不 preventDefault、不手动翻转、不转发 click**。不支持 switch 的环境（动态创建检测，**不用 UA**）降级 `navigator.vibrate(10)`（仅真实手势内）；其余静默 no-op |
 | **音效** | 纯 Web Audio 合成：`complete`（880→1320 Hz 上扬，50ms，gain 0.12）、`uncomplete`（880→660 Hz 下沉，38ms，gain 0.08）、`tick`（600 Hz 轻触，18ms，gain 0.05）；首次手势同步 `resume()` 并预热静音 buffer，`visibilitychange` 回前台自动恢复；**30ms 节流**防连点爆音 |
 
+- 接口：`window.ScheduleHaptics = { attach(el), detach(el), trigger() }`；app.js 仅在
+  渲染完成后调用 `attach(el)`（渲染前对旧节点 `detach()`），点击处理器中**不再存在**
+  任何 tap/trigger 旧调用，震动完全由 label 原生路径驱动。
 - 挂载范围：每日计划任务卡、每周菜单勾选行、顶部 Tab、重置按钮、回到当前悬浮按钮。
-- 防双触发：label click 先 `preventDefault`；per-element **80ms 防抖锁**仅作用于
-  switch 路径（该路径才存在 label/switch 双通道），重复通道被拦截、状态干净翻转一次，
-  “连点 10 次翻转 10 次”实测通过。
-- 层级避让：目标元素置为 `position: relative; overflow: visible`；若内部存在
-  `button/a/[role=button]`，自动提升到 `z-index: 3`（高于 label 的 2），不被遮挡。
-- 重挂载：每次视图渲染先 `destroy()` 再挂载，切换 Tab 不泄漏旧 overlay。
+- 滚动兼容：label `touch-action: manipulation`，**不设 `touch-action:none`、不绑定
+  touchmove/pointermove 并 preventDefault**，按住卡片上下滑动正常（实测 Δ=712px）。
+- 子元素处理：目标元素内若有 `button/a/[role=button]`，自动提升到 `z-index:3`
+  （高于 label 的 2）不被整卡 label 拦截；子按钮点击不触发整卡震动（正确行为），
+  若子按钮自身需要震动则单独对其 `attach()`。
+- 清理：每次列表重绘/Tab 切换前对旧节点显式 `detach()`（并兜底清理孤儿 switch），
+  切 Tab 10 次后 label/switch 数量恒等于当前视图元素数（39/39），不累积。
 - 测试钩子：页面加载前设置 `window.__SCHEDULE_HAPTICS_FORCE__ = "switch" | "vibrate"`
   可强制走指定路径；`window.ScheduleSounds.debug = { attempts, throttled, played }`
   供节流断言使用。
@@ -250,8 +254,8 @@ node tests/run-cdp-tests.mjs
 
 ## 九、测试结果（2026-10-23，Chrome Headless 模拟 iPhone 390×844 @3x）
 
-自动化脚本 `tests/run-cdp-tests.mjs` 共 **85/85 项断言全部通过，控制台 0 错误**
-（脚本输出口径 85 项；`screenshots/test-results.json` 另含最终“控制台零错误”复核一条）。
+自动化脚本 `tests/run-cdp-tests.mjs` 共 **88/88 项断言全部通过，控制台 0 错误**
+（脚本输出口径 88 项；`screenshots/test-results.json` 另含最终“控制台零错误”复核一条）。
 截图与原始结果见 `screenshots/`（`daily-top.png`、`daily-bottom.png`、`menu-top.png`、
 `menu-bottom.png`、`dark-top.png`、`menu-dark.png`、`test-results.json`）。
 
@@ -259,7 +263,7 @@ node tests/run-cdp-tests.mjs
 
 | # | 验收项 | 结果 |
 |---|---|---|
-| 1 | 本地静态服务器打开，无控制台错误 | ✔ 85 断言运行全程 `console.error` / 未捕获异常 = 0（无手势 vibrate 拦截提示为预期噪音，已单独计数为 0） |
+| 1 | 本地静态服务器打开，无控制台错误 | ✔ 88 断言运行全程 `console.error` / 未捕获异常 = 0（无手势 vibrate 拦截提示为预期噪音，已单独计数为 0） |
 | 2 | 390×844 无横向滚动；可点击区域 ≥44px；底部按钮不被遮挡 | ✔ overflow=0px；每日计划与菜单两视图全部交互元素 ≥44×44（菜单勾选圆圈 ≥32×32）；滚到底时最后一张卡 `bottom ≤` 悬浮按钮 `top` |
 | 3 | 点击任务卡切换完成；刷新后保持 | ✔ 点击→`aria-checked=true`、绿色左边框、删除线；完成态用“灰色文字 + 浅绿底”表达（**不使用整体 opacity 降透明度**，保证对比度）；刷新后 1/35 保留 |
 | 4 | 每日计划/每周菜单打卡互不影响；刷新停留上次 Tab | ✔ daily 1/35 与 menu 1/28 独立，切换往返不串；刷新后停留在上次 Tab（菜单） |
@@ -286,8 +290,8 @@ node tests/run-cdp-tests.mjs
 | 10 | 顶部仅两个 Tab，无“不运动日”入口 | ✔ 页面仅“每日计划 / 每周菜单”两个 Tab，整页文案无“不运动日”（自动化断言） |
 | 11 | 每周菜单 28 餐次 + 训练日/休息日加餐共享勾选 | ✔ 7 卡/28 行；点击周一早餐 → 1/28·4%；勾选加餐 → `-snackTraining` 与 `-snackRest` 两键同写、两标签同时完成态、进度只 +1（2/28·7%）；再点 → 两键同清、回 1/28 |
 | 12 | 旧数据迁移 v1→v2（不报错） | ✔ 旧 `mode="training"` → 映射 `"daily"`，`completed.training` 保留（1/35），回写 version 2；旧 `mode="rest"` → 映射 `"menu"`，`completed.rest` 丢弃、`completed.menu={}`（0/28），全程无异常 |
-| 13 | 点击音效 + iOS 震动（switch 路径） | ✔ 强制 switch 路径：39 个透明 label + 39 个隐藏 switch 正确挂载（2 Tab + 重置 + FAB + 35 卡）；真实输入事件点击 label → 状态恰好翻转一次 + switch 同步翻转；80ms 防抖锁拦截重复通道（120ms 后干净翻转）；同一卡连点 10 次交替翻转 10 次；切 Tab 重挂载 32/39 个无泄漏 |
-| 14 | 音效节流与震动降级 | ✔ 5 卡同步连点：`attempts=5、played=1、throttled=4`（30ms 节流生效，无爆音）；强制 vibrate 路径：不创建任何 label/switch，点击触发 `vibrate(10)` 且打卡成功；无 autoplay 拦截、无手势 vibrate 静默跳过（良性降级计数 0） |
+| 13 | 点击音效 + iOS 震动（switch 原生转发，无程序化触发） | ✔ 强制 switch 路径：39 个透明 label + 39 个真实 switch 挂载；真实输入点击 label → 状态恰好翻转一次 + switch 由浏览器原生翻转；label 原生转发下三次点击干净交替（true→false→true）；同一卡快速连点 5 次干净翻转 5 次；切 Tab 10 次后 label/switch 恒为 39/39 无累积；后台切回后再点击 switch 仍原生翻转 |
+| 14 | 滚动兼容 / 子按钮 / 音效节流 / 震动降级 | ✔ 按住卡片向上滑动页面正常滚动（Δ=712px，label 未拦截）；子按钮 `z-index:3` 高于整卡 label，真实点击子按钮功能正常、整卡不翻转、switch 不翻转（不双触发）；5 卡同步连点 `attempts=5、played=1、throttled=4`（30ms 节流）；强制 vibrate 路径不创建 label/switch、`vibrate(10)` 触发且打卡成功；无 autoplay 拦截 |
 
 ### 交互细节（实现层面）
 
@@ -296,8 +300,9 @@ node tests/run-cdp-tests.mjs
 - 焦点可见：所有交互元素有 `:focus-visible` 蓝色描边。
 - “重置今天”为二次确认（先进入“确认重置?”态，3.5 秒内再点才生效），**只清当前视图**。
 - “当前”高亮 / “已过”徽章 / 预告卡 / “回到当前”悬浮按钮仅存在于每日计划视图。
-- 点击反馈统一走 `hapticsGate()`（震动闸门 + 80ms 防双触发）+ `ScheduleSounds.play()`：
-  打卡/切 Tab/重置/回当前均带震动与音效，但任何模块异常都不阻断原逻辑。
+- 点击反馈：音效由 app.js 点击处理器调用 `ScheduleSounds.play()`；震动由
+  `ScheduleHaptics.attach(el)` 的透明 label 原生路径触发（app.js 中无任何
+  tap/trigger 旧调用）；任何模块异常都不阻断原逻辑。
 - `prefers-reduced-motion` 下禁用动画与平滑滚动。
 - 测试钩子：页面加载前设置 `window.__SCHEDULE_TEST_NOW__ = "HH:MM"` 可固定“当前时间”
   以便复现任意时段（仅影响时分，不影响日期）；`window.__SCHEDULE_HAPTICS_FORCE__ =
@@ -321,4 +326,8 @@ python tools/make-icons.py   # 重新输出 icon-180.png / icon-192.png / icon-5
 2. **本地局域网预览时 iOS 图标**：`http://<电脑IP>` 非 https，个别 iOS 版本可能不显示主屏幕图标——线上部署（https）后完全正常。
 3. **时区**：所有“今天”判断使用设备本地时区；跨时区旅行后首次打开会按新时区重置当天。
 4. **旧数据兼容**：schema 已升至 version 2（daily/menu）；老用户升级后由迁移逻辑自动处理，旧“不运动日”打卡（rest）不与菜单对应，按设计丢弃。
-5. **音效与震动**：音效依赖用户首次真实手势解锁 AudioContext（首次点击后生效）；iOS 震动依赖 Safari 17.4+ 的 switch 控件（更早版本自动降级为无震动）；桌面浏览器无手势的程序化 `vibrate` 会被浏览器拦截，应用按设计静默跳过。
+5. **音效与震动**：音效依赖用户首次真实手势解锁 AudioContext（首次点击后生效）；iOS 震动
+   依赖 Safari 对 `<input type="checkbox" switch>` 的支持（动态检测，iOS 26.5+/27 要求
+   震动必须来自用户对真实 switch 的直接物理点击，因此本页用透明 label 原生转发、无任何
+   程序化触发）；更早版本自动降级为无震动；桌面浏览器无手势的程序化 `vibrate` 会被
+   浏览器拦截，应用按设计静默跳过。

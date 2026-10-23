@@ -354,13 +354,13 @@
       if (e.target.closest("button, a")) {
         return;
       }
-      handleDailyToggle(card, task.id);
+      handleDailyToggle(task.id);
     });
 
     card.addEventListener("keydown", function (e) {
       if (e.key === "Enter" || e.key === " " || e.key === "Spacebar") {
         e.preventDefault();
-        handleDailyToggle(card, task.id);
+        handleDailyToggle(task.id);
       }
     });
 
@@ -475,12 +475,12 @@
       if (e.target.closest("button, a")) {
         return;
       }
-      handleMealToggle(row, id);
+      handleMealToggle(id);
     });
     row.addEventListener("keydown", function (e) {
       if (e.key === "Enter" || e.key === " " || e.key === "Spacebar") {
         e.preventDefault();
-        handleMealToggle(row, id);
+        handleMealToggle(id);
       }
     });
 
@@ -526,12 +526,12 @@
       if (e.target.closest("button, a")) {
         return;
       }
-      handleMealToggle(row, id);
+      handleMealToggle(id);
     });
     row.addEventListener("keydown", function (e) {
       if (e.key === "Enter" || e.key === " " || e.key === "Spacebar") {
         e.preventDefault();
-        handleMealToggle(row, id);
+        handleMealToggle(id);
       }
     });
 
@@ -693,6 +693,7 @@
   }
 
   function renderAll() {
+    detachHaptics(); // 重绘前：旧节点 detach，防 label/switch 累积
     renderDate();
     renderModeButtons();
     if (state.mode === "daily") {
@@ -754,18 +755,6 @@
 
   /* ============ 震动 + 音效集成（与打卡逻辑解耦，任何一方失败不阻断打卡） ============ */
 
-  /** 震动闸门：true=允许转发；false=80ms 内重复通道（label click + switch 合成 click） */
-  function hapticsGate(el) {
-    if (!window.ScheduleHaptics) {
-      return true;
-    }
-    try {
-      return window.ScheduleHaptics.tap(el) !== false;
-    } catch (e) {
-      return true; // 容错：震动模块异常时打卡必须可用
-    }
-  }
-
   function playSound(type) {
     if (!window.ScheduleSounds) {
       return;
@@ -775,52 +764,59 @@
     } catch (e) { /* 静默：音效失败不影响打卡 */ }
   }
 
-  /** 通用轻触反馈（Tab / 重置 / 回到当前）。返回是否允许继续执行原逻辑。 */
-  function feedbackTick(el) {
-    if (!hapticsGate(el)) {
-      return false;
-    }
-    playSound("tick");
-    return true;
-  }
-
-  /** 每日计划任务卡点击：唯一入口，状态恰好翻转一次 */
-  function handleDailyToggle(el, id) {
-    if (!hapticsGate(el)) {
-      return;
-    }
+  /** 每日计划任务卡点击：状态恰好翻转一次（震动由透明 label 原生触发，无需手动调用） */
+  function handleDailyToggle(id) {
     toggleTask(id);
     playSound(state.completed.daily[id] ? "complete" : "uncomplete");
   }
 
-  /** 每周菜单餐次行点击：唯一入口（含加餐共享勾选位） */
-  function handleMealToggle(el, id) {
-    if (!hapticsGate(el)) {
-      return;
-    }
+  /** 每周菜单餐次行点击：状态恰好翻转一次（含加餐共享勾选位） */
+  function handleMealToggle(id) {
     toggleMeal(id);
     playSound(isMealDone(id) ? "complete" : "uncomplete");
   }
 
-  /** 渲染完成后重新挂载震动反馈层（先 destroy 再 mount，避免旧 DOM 泄漏） */
+  /** 渲染前：对旧节点显式 detach（移除 label + switch），避免 DOM 累积 */
+  function detachHaptics() {
+    if (!window.ScheduleHaptics) {
+      return;
+    }
+    try {
+      document.querySelectorAll(".schedule-haptic-label").forEach(function (l) {
+        try {
+          window.ScheduleHaptics.detach(l.parentElement);
+        } catch (e) { /* 忽略 */ }
+      });
+      /* 兜底：清理 label 已不在 DOM 的孤儿 switch */
+      document.querySelectorAll(".schedule-haptic-switch").forEach(function (sw) {
+        var lab = document.querySelector('label[for="' + sw.id + '"]');
+        if (!lab || !lab.isConnected) {
+          try {
+            if (sw.parentNode) sw.parentNode.removeChild(sw);
+          } catch (e) { /* 忽略 */ }
+        }
+      });
+    } catch (e) { /* 静默：震动清理失败不影响打卡 */ }
+  }
+
+  /** 渲染完成后：为当前视图的全部可点击元素 attach 震动反馈层 */
   function mountHaptics() {
     if (!window.ScheduleHaptics) {
       return;
     }
     try {
-      window.ScheduleHaptics.destroy();
       els.modeButtons.forEach(function (b) {
-        window.ScheduleHaptics.mount(b);
+        window.ScheduleHaptics.attach(b);
       });
-      window.ScheduleHaptics.mount(els.resetBtn);
-      window.ScheduleHaptics.mount(els.fab);
+      window.ScheduleHaptics.attach(els.resetBtn);
+      window.ScheduleHaptics.attach(els.fab);
       if (state.mode === "daily") {
         els.taskList.querySelectorAll(".task-card").forEach(function (c) {
-          window.ScheduleHaptics.mount(c);
+          window.ScheduleHaptics.attach(c);
         });
       } else {
         els.taskList.querySelectorAll(".menu-row").forEach(function (r) {
-          window.ScheduleHaptics.mount(r);
+          window.ScheduleHaptics.attach(r);
         });
       }
     } catch (e) { /* 静默：震动挂载失败不影响打卡 */ }
@@ -904,9 +900,7 @@
   function bindEvents() {
     els.modeButtons.forEach(function (btn) {
       btn.addEventListener("click", function () {
-        if (!feedbackTick(btn)) {
-          return;
-        }
+        playSound("tick");
         var mode = btn.dataset.mode;
         if (mode !== state.mode) {
           state.mode = mode;
@@ -918,9 +912,7 @@
     });
 
     els.resetBtn.addEventListener("click", function () {
-      if (!feedbackTick(els.resetBtn)) {
-        return;
-      }
+      playSound("tick");
       if (els.resetBtn.dataset.arm === "1") {
         resetToday();
       } else {
@@ -929,9 +921,7 @@
     });
 
     els.fab.addEventListener("click", function () {
-      if (!feedbackTick(els.fab)) {
-        return;
-      }
+      playSound("tick");
       if (state.mode !== "daily") {
         return;
       }
