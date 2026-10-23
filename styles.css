@@ -699,10 +699,182 @@ svg {
   display: none;
 }
 
+/* ---------- 每周菜单 ---------- */
+.menu-card {
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  background: var(--card);
+  box-shadow: var(--shadow);
+  overflow: hidden;
+}
+
+.menu-card-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 12px 14px 10px;
+  border-bottom: 1px solid var(--line);
+}
+
+.menu-day {
+  margin: 0;
+  font-size: 17px;
+  font-weight: 700;
+  color: var(--ink);
+}
+
+.menu-badges {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  justify-content: flex-end;
+}
+
+.menu-rows {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.menu-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  min-height: 44px;
+  padding: 11px 14px;
+  cursor: pointer;
+  touch-action: manipulation;
+  -webkit-tap-highlight-color: transparent;
+  -webkit-user-select: none;
+  user-select: none;
+  background-color: var(--card);
+  transition: background-color 0.2s ease;
+  overflow-wrap: anywhere;
+}
+
+.menu-row + .menu-row {
+  border-top: 1px solid var(--line);
+}
+
+.menu-check {
+  flex: 0 0 32px;
+  width: 32px;
+  height: 32px;
+  margin-top: 1px;
+  border-radius: 50%;
+  border: 2px solid var(--line-strong);
+  background: var(--card);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: transparent;
+  transition: background 0.18s ease, border-color 0.18s ease, color 0.18s ease;
+}
+
+.menu-check svg {
+  width: 16px;
+  height: 16px;
+}
+
+.menu-row-body {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.menu-label {
+  display: inline-block;
+  margin-bottom: 2px;
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--accent-strong);
+}
+
+.menu-text {
+  margin: 0;
+  font-size: 14.5px;
+  line-height: 1.5;
+  color: var(--ink-2);
+}
+
+/* 完成：灰色文字 + 浅绿底 + 删除线（不用 opacity） */
+.menu-row.done {
+  background-color: var(--card);
+  background-image: linear-gradient(90deg, var(--green-soft), var(--card) 55%);
+}
+
+.menu-row.done .menu-check {
+  background: var(--green);
+  border-color: var(--green);
+  color: #ffffff;
+}
+
+.menu-row.done .menu-text {
+  color: var(--muted);
+  text-decoration: line-through;
+  text-decoration-thickness: 1.5px;
+  text-decoration-color: var(--green);
+}
+
+/* 加餐：训练日 / 休息日 共享一个勾选位 */
+.menu-snack-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+}
+
+.menu-snack-item {
+  min-width: 0;
+  padding: 8px 10px;
+  border-radius: 10px;
+  background: var(--line);
+}
+
+.menu-snack-label {
+  display: block;
+  margin-bottom: 2px;
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--muted);
+}
+
+.menu-snack-text {
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.45;
+  color: var(--ink-2);
+}
+
+.menu-row.done .menu-snack-text {
+  color: var(--muted);
+  text-decoration: line-through;
+  text-decoration-thickness: 1.5px;
+  text-decoration-color: var(--green);
+}
+
+/* 卡片底部：饮水目标 */
+.menu-card-foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 4px 8px;
+  padding: 10px 14px;
+  border-top: 1px solid var(--line);
+  font-size: 12.5px;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.menu-foot-hint {
+  color: var(--faint);
+}
+
 /* ---------- 焦点可见性 ---------- */
 .mode-btn:focus-visible,
 .reset-btn:focus-visible,
 .task-card:focus-visible,
+.menu-row:focus-visible,
 .now-card:focus-visible,
 .fab:focus-visible {
   outline: 3px solid var(--focus-ring);
