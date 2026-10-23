@@ -1,7 +1,15 @@
 /* =========================================================
- * 一日计划 · 考研 + 力量训练 时间表打卡
+ * 一日计划 · 考研时间表 + 每周菜单打卡
  * 纯原生 JS，无依赖。状态持久化：localStorage
- * key: kaoyan-daily-schedule-v1
+ * key: kaoyan-daily-schedule-v1（schema version 2）
+ *
+ * 双视图（Tab）：
+ *   daily —— 每日计划：35 项时间表（t- 前缀），当前高亮/已过徽章/回到当前
+ *   menu  —— 每周菜单：7 天 × 4 餐 = 28 餐次（训练日/休息日加餐共享一个勾选位）
+ *
+ * 旧数据迁移（version 1 → 2，不报错、不丢每日计划数据）：
+ *   mode "training" → "daily"，completed.training → completed.daily
+ *   mode "rest"     → "menu"，completed.rest 直接丢弃，completed.menu 初始化为空
  * ========================================================= */
 (function () {
   "use strict";
@@ -9,11 +17,11 @@
   /* ---------------- 常量与任务数据 ---------------- */
 
   var STORAGE_KEY = "kaoyan-daily-schedule-v1";
-  var STORAGE_VERSION = 1;
-  var MODES = ["training", "rest"];
-  var MODE_LABELS = { training: "运动日", rest: "不运动日" };
+  var STORAGE_VERSION = 2;
+  var MODES = ["daily", "menu"];
+  var MODE_LABELS = { daily: "每日计划", menu: "每周菜单" };
 
-  /** 运动日 training */
+  /** 每日计划（沿用原 training 数组，t- 前缀 35 项） */
   var TRAINING = [
     {id:"t-0650",time:"06:50",title:"起床",details:"醒后坐10秒再站，不猛然起身",category:"健康",badges:["血压"]},
     {id:"t-0700",time:"07:00",title:"第一口水 300ml",details:"温水，分3-5分钟小口慢饮，不猛灌",category:"饮水",badges:[]},
@@ -52,45 +60,24 @@
     {id:"t-2230",time:"22:30",title:"睡觉",details:"固定起床时间；夜间如醒不摸手机看时间",category:"睡眠",badges:[]}
   ];
 
-  /** 不运动日 rest */
-  var REST = [
-    {id:"r-0650",time:"06:50",title:"起床",details:"醒后坐10秒再站，不猛然起身",category:"健康",badges:["血压"]},
-    {id:"r-0700",time:"07:00",title:"第一口水 300ml",details:"温水，分3-5分钟小口慢饮，不猛灌",category:"饮水",badges:[]},
-    {id:"r-0710",time:"07:10",title:"洗漱 + 颈肩轻活动",details:"收下巴、肩胛后缩各5次，不低头刷手机",category:"健康",badges:["颈椎"]},
-    {id:"r-0730",time:"07:30",title:"早餐",details:"水煮蛋/蒸蛋1个 + 好消化主食 + 无糖豆浆/牛奶200-250ml + 少量焯拌菜；不油条不煎蛋",category:"饮食",badges:["脾胃"]},
-    {id:"r-0800",time:"08:00",title:"散步 + 播客",details:"喝水100-150ml；走路目视前方，不低头刷屏",category:"休息",badges:["颈椎"]},
-    {id:"r-0830",time:"08:30",title:"考研学习①：高难度逻辑科目",details:"屏幕与眼平齐，腰部有支撑；50分钟必起身",category:"学习",badges:["颈椎","前列腺"]},
-    {id:"r-0920",time:"09:20",title:"强制起身10分钟",details:"走动、接水、颈肩拉伸；喝水200ml；有尿意即排",category:"休息",badges:["颈椎","前列腺"]},
-    {id:"r-0930",time:"09:30",title:"考研学习②",details:"继续高难度内容或切换相近逻辑科目",category:"学习",badges:["颈椎","前列腺"]},
-    {id:"r-1020",time:"10:20",title:"起身休息",details:"喝水150ml；远眺",category:"休息",badges:[]},
-    {id:"r-1030",time:"10:30",title:"考研学习③",details:"11:00前可再小口喝水100ml",category:"学习",badges:["颈椎","前列腺"]},
-    {id:"r-1120",time:"11:20",title:"整理/复盘上午",details:"起身活动，不连续坐满50分钟以上",category:"学习",badges:["颈椎"]},
-    {id:"r-1140",time:"11:40",title:"午餐前喝水",details:"100-150ml",category:"饮水",badges:[]},
-    {id:"r-1200",time:"12:00",title:"午餐",details:"主食1拳 + 鱼虾/鸡胸/豆腐1掌 + 蔬菜2拳；不喝肉汤、不碰啤酒；七分饱",category:"饮食",badges:["尿酸","脾胃"]},
-    {id:"r-1225",time:"12:25",title:"慢走/站立10-15分钟",details:"饭后不立刻躺；走动促尿酸排泄，减轻前列腺压迫",category:"休息",badges:["尿酸","前列腺"]},
-    {id:"r-1250",time:"12:50",title:"午休20-30分钟",details:"不超过30分钟；不趴桌压颈",category:"休息",badges:["颈椎"]},
-    {id:"r-1320",time:"13:20",title:"午休起床喝水200ml",details:"温水小口",category:"饮水",badges:[]},
-    {id:"r-1330",time:"13:30",title:"考研学习④",details:"坐姿同上午；50分钟必起身",category:"学习",badges:["颈椎","前列腺"]},
-    {id:"r-1420",time:"14:20",title:"强制起身10分钟",details:"喝水150ml；颈肩活动；排尿，不憋",category:"休息",badges:["颈椎","前列腺"]},
-    {id:"r-1430",time:"14:30",title:"考研学习⑤",details:"",category:"学习",badges:["颈椎","前列腺"]},
-    {id:"r-1520",time:"15:20",title:"起身休息",details:"喝水150ml",category:"休息",badges:[]},
-    {id:"r-1530",time:"15:30",title:"可选加餐",details:"不饿不加餐；饿了选水果半个/无糖酸奶100g/坚果一小把；喝水200ml",category:"饮食",badges:[]},
-    {id:"r-1600",time:"16:00",title:"补水/放松",details:"喝水150-200ml",category:"饮水",badges:[]},
-    {id:"r-1630",time:"16:30",title:"快走或轻阻力活动20-30分钟",details:"不训练；对尿酸和前列腺均有益；或继续学习",category:"训练",badges:["尿酸","前列腺"]},
-    {id:"r-1730",time:"17:30",title:"放松/拉伸",details:"轻活动后拉伸，补水",category:"休息",badges:[]},
-    {id:"r-1800",time:"18:00",title:"自由休息/整理",details:"不洗澡；等待晚餐",category:"休息",badges:[]},
-    {id:"r-1830",time:"18:30",title:"晚餐",details:"鱼虾/豆腐/豆制品 + 焯蔬菜 + 少量主食；七八分饱；不饮酒、不喝浓汤",category:"饮食",badges:["尿酸","脾胃"]},
-    {id:"r-1900",time:"19:00",title:"考研学习⑥",details:"巩固型；50分钟必起身；不憋尿",category:"学习",badges:["颈椎","前列腺"]},
-    {id:"r-2000",time:"20:00",title:"强制起身10分钟",details:"喝水150ml；走动、颈肩拉伸；排尿",category:"休息",badges:["颈椎","前列腺"]},
-    {id:"r-2010",time:"20:10",title:"考研学习⑦",details:"难度低于晨间",category:"学习",badges:["颈椎"]},
-    {id:"r-2100",time:"21:00",title:"不运动日洗澡",details:"温水澡，睡前1-1.5小时完成",category:"休息",badges:["血压"]},
-    {id:"r-2120",time:"21:20",title:"护肤、复盘、轻播客",details:"准备第二天；睡前排尿",category:"休息",badges:["前列腺"]},
-    {id:"r-2200",time:"22:00",title:"睡前准备",details:"调暗灯光；不大量喝水；睡前排尿",category:"休息",badges:["前列腺"]},
-    {id:"r-2220",time:"22:20",title:"上床酝酿",details:"4-7-8呼吸4-6轮或身体扫描；不刷手机",category:"睡眠",badges:["血压"]},
-    {id:"r-2230",time:"22:30",title:"睡觉",details:"固定起床时间",category:"睡眠",badges:[]}
+  /**
+   * 每周菜单（7 天 × 4 餐 = 28 餐次；加餐为训练日/休息日共享勾选位）
+   * 遵循：鸡蛋 1—2 个/天（水煮/蒸蛋，不煎炸）；蛋白分散；不酒、不浓汤、不甜饮；
+   * 主食好消化；蔬菜焯拌/清炒；汤为素汤少量且不喝汤底。
+   */
+  var WEEKLY_MENU = [
+    {day:"周一",breakfast:"蒸蛋羹1个 + 小米粥1碗 + 无糖豆浆250ml + 焯拌菠菜",lunch:"米饭1拳 + 清蒸鲈鱼1掌 + 蒜蓉西兰花 + 番茄豆腐汤（素汤、少量、不喝汤底）",snackTraining:"香蕉半根 + 无糖酸奶100g",snackRest:"苹果半个",dinner:"杂粮饭半拳 + 豆腐炒虾仁 + 焯拌生菜",waterTraining:"约2600ml",waterRest:"约2200ml",badges:["脾胃","尿酸"]},
+    {day:"周二",breakfast:"水煮蛋1个 + 全麦馒头半个 + 温牛奶250ml + 小番茄",lunch:"米饭1拳 + 鸡胸肉炒彩椒 + 清炒油麦菜 + 冬瓜汤（素汤、少量）",snackTraining:"全麦面包1片 + 温豆浆200ml",snackRest:"无糖酸奶100g",dinner:"小米粥1碗 + 清蒸鳕鱼 + 焯拌秋葵",waterTraining:"约2700ml",waterRest:"约2100ml",badges:["脾胃","尿酸"]},
+    {day:"周三",breakfast:"蒸蛋羹1个 + 软燕麦粥1碗 + 无糖豆浆250ml + 焯拌黄瓜",lunch:"馒头1个 + 番茄炖豆腐 + 清炒西葫芦 + 紫菜汤（素汤、少量）",snackTraining:"苹果半个 + 无糖酸奶100g",snackRest:"坚果一小把",dinner:"山药粥1碗 + 白灼虾 + 焯拌西兰花",waterTraining:"约2500ml",waterRest:"约2000ml",badges:["脾胃","尿酸"]},
+    {day:"周四",breakfast:"水煮蛋1个 + 蒸红薯1个 + 温牛奶250ml + 焯拌胡萝卜丝",lunch:"软杂粮饭1拳 + 清蒸鸡腿肉（去皮） + 蒜蓉菠菜 + 冬瓜虾皮汤（少量）",snackTraining:"香蕉半根 + 温豆浆200ml",snackRest:"苹果半个",dinner:"小米粥1碗 + 豆腐蒸蛋（用半个蛋） + 焯拌油麦菜",waterTraining:"约2600ml",waterRest:"约2200ml",badges:["脾胃","尿酸"]},
+    {day:"周五",breakfast:"蒸蛋羹1个 + 小米粥1碗 + 无糖豆浆250ml + 焯拌木耳",lunch:"米饭1拳 + 清炒虾仁 + 蒜蓉西兰花 + 番茄豆腐汤（素汤、少量）",snackTraining:"全麦面包1片 + 无糖酸奶100g",snackRest:"无糖酸奶100g",dinner:"杂粮饭半拳 + 清蒸鲈鱼 + 焯拌生菜",waterTraining:"约2700ml",waterRest:"约2100ml",badges:["脾胃","尿酸"]},
+    {day:"周六",breakfast:"水煮蛋1个 + 全麦馒头半个 + 温牛奶250ml + 小番茄",lunch:"馒头1个 + 鸡胸肉炒蘑菇 + 清炒小白菜 + 紫菜汤（素汤、少量）",snackTraining:"苹果半个 + 温豆浆200ml",snackRest:"香蕉半根",dinner:"山药粥1碗 + 白灼虾 + 焯拌菠菜",waterTraining:"约2500ml",waterRest:"约2000ml",badges:["脾胃","尿酸"]},
+    {day:"周日",breakfast:"蒸蛋羹1个 + 软燕麦粥1碗 + 无糖豆浆250ml + 焯拌黄瓜",lunch:"米饭1拳 + 番茄炖豆腐 + 清炒西葫芦 + 冬瓜汤（素汤、少量）",snackTraining:"香蕉半根 + 无糖酸奶100g",snackRest:"坚果一小把",dinner:"小米粥1碗 + 清蒸鳕鱼 + 焯拌秋葵",waterTraining:"约2600ml",waterRest:"约2200ml",badges:["脾胃","尿酸"]}
   ];
 
-  var SCHEDULES = { training: TRAINING, rest: REST };
+  /** 菜单 key：mon/tue/... + breakfast/lunch/snackTraining/snackRest/dinner */
+  var MENU_DAY_CODES = ["mon", "tue", "wed", "thu", "fri", "sat", "sun"];
+  var MENU_TOTAL = 28; // 7 天 × 4 餐（加餐共享 1 个勾选位）
 
   /* ---------------- 日期 / 时间工具 ---------------- */
 
@@ -162,9 +149,42 @@
     return {
       version: STORAGE_VERSION,
       date: localDateKey(),
-      mode: "training",
-      completed: { training: {}, rest: {} }
+      mode: "daily",
+      completed: { daily: {}, menu: {} }
     };
+  }
+
+  /* -------- 旧数据迁移（version 1 → 2，必须不报错） -------- */
+
+  /** mode 映射："training"→"daily"，"rest"→"menu"，其余非法值回退 "daily" */
+  function normalizeMode(m) {
+    if (m === "training") return "daily";
+    if (m === "rest") return "menu";
+    if (m === "daily" || m === "menu") return m;
+    return "daily";
+  }
+
+  /**
+   * completed 映射：
+   *   training → daily（保留 t-* 打卡）
+   *   rest     → 丢弃（r-* 与菜单餐次无对应关系，menu 初始化为空）
+   */
+  function normalizeCompleted(src) {
+    var out = { daily: {}, menu: {} };
+    if (!src || typeof src !== "object") {
+      return out;
+    }
+    if (src.daily && typeof src.daily === "object") {
+      out.daily = Object.assign({}, src.daily);
+    }
+    if (src.menu && typeof src.menu === "object") {
+      out.menu = Object.assign({}, src.menu);
+    }
+    if (src.training && typeof src.training === "object") {
+      out.daily = Object.assign({}, out.daily, src.training);
+    }
+    /* src.rest 有意丢弃，不做映射 */
+    return out;
   }
 
   function loadState() {
@@ -182,16 +202,10 @@
     var state = defaultState();
     var today = localDateKey();
     if (parsed && typeof parsed === "object") {
-      if (parsed.mode === "training" || parsed.mode === "rest") {
-        state.mode = parsed.mode;
-      }
-      // 日期不是今天：两个模式的完成状态全部清空，mode 保留
-      if (parsed.date === today && parsed.completed && typeof parsed.completed === "object") {
-        MODES.forEach(function (mode) {
-          if (parsed.completed[mode] && typeof parsed.completed[mode] === "object") {
-            state.completed[mode] = Object.assign({}, parsed.completed[mode]);
-          }
-        });
+      state.mode = normalizeMode(parsed.mode);
+      // 日期不是今天：两个视图的完成状态全部清空，mode 保留
+      if (parsed.date === today) {
+        state.completed = normalizeCompleted(parsed.completed);
       }
     }
     return state;
@@ -204,18 +218,18 @@
   /* ---------------- 状态 ---------------- */
 
   var state = loadState();
-  persist(); // 启动即写入今日日期（回写跨日重置结果）
+  persist(); // 启动即回写：跨日重置结果 + v1→v2 迁移后的新结构
 
   var els = {};
   var lastRenderedHM = "";
   var resetTimer = null;
 
-  function tasksOf(mode) {
-    return SCHEDULES[mode] || TRAINING;
+  function dailyTasks() {
+    return TRAINING;
   }
 
   /**
-   * 当前时间段索引：最后一个 start <= now 的任务；
+   * 当前时间段索引（仅每日计划）：最后一个 start <= now 的任务；
    * 早于首个任务返回 -1；最后一个任务持续至 23:59。
    */
   function currentIndex(tasks, nowMin) {
@@ -230,7 +244,7 @@
     return idx;
   }
 
-  /* ---------------- 渲染 ---------------- */
+  /* ---------------- 渲染：通用小件 ---------------- */
 
   function partOf(time) {
     var h = parseInt(time.split(":")[0], 10);
@@ -276,6 +290,10 @@
     return b;
   }
 
+  var CHECK_SVG = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12.5l4.2 4.2L19 7.5"/></svg>';
+
+  /* ---------------- 渲染：每日计划 ---------------- */
+
   function makeCard(task) {
     var card = document.createElement("article");
     card.className = "task-card";
@@ -285,7 +303,6 @@
     card.tabIndex = 0;
     card.dataset.id = task.id;
 
-    /* 时间列 */
     var timeCol = document.createElement("div");
     timeCol.className = "task-time";
     var timeEl = document.createElement("span");
@@ -295,7 +312,6 @@
     timeCol.appendChild(makeChip("已过", "chip-past"));
     card.appendChild(timeCol);
 
-    /* 主体 */
     var body = document.createElement("div");
     body.className = "task-body";
 
@@ -328,26 +344,23 @@
     }
     card.appendChild(body);
 
-    /* 勾选圆 */
     var check = document.createElement("span");
     check.className = "task-check";
     check.setAttribute("aria-hidden", "true");
-    check.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12.5l4.2 4.2L19 7.5"/></svg>';
+    check.innerHTML = CHECK_SVG;
     card.appendChild(check);
 
-    /* 事件：整卡点击切换；未来卡内若有 button/a 则排除 */
     card.addEventListener("click", function (e) {
       if (e.target.closest("button, a")) {
         return;
       }
-      toggleTask(task.id);
+      handleDailyToggle(card, task.id);
     });
 
-    /* 键盘：Enter / Space 均可切换；Space 阻止默认滚动 */
     card.addEventListener("keydown", function (e) {
       if (e.key === "Enter" || e.key === " " || e.key === "Spacebar") {
         e.preventDefault();
-        toggleTask(task.id);
+        handleDailyToggle(card, task.id);
       }
     });
 
@@ -357,7 +370,7 @@
   function renderList() {
     var listEl = els.taskList;
     listEl.textContent = "";
-    var tasks = tasksOf(state.mode);
+    var tasks = dailyTasks();
     var frag = document.createDocumentFragment();
     var lastPart = null;
     tasks.forEach(function (task) {
@@ -372,14 +385,17 @@
   }
 
   function renderStates() {
-    var tasks = tasksOf(state.mode);
+    if (state.mode !== "daily") {
+      return;
+    }
+    var tasks = dailyTasks();
     var nowMin = timeToMin(formatHM(getNow()));
     var curIdx = currentIndex(tasks, nowMin);
     var cards = els.taskList.querySelectorAll(".task-card");
 
     cards.forEach(function (card, i) {
       var id = card.dataset.id;
-      var done = !!state.completed[state.mode][id];
+      var done = !!state.completed.daily[id];
       var isCurrent = i === curIdx;
       var isPast = curIdx > -1 && i < curIdx;
 
@@ -393,12 +409,214 @@
     });
   }
 
+  /* ---------------- 渲染：每周菜单 ---------------- */
+
+  /** 加餐共享勾选位：返回该行对应的一个或两个存储键 */
+  function mealKeys(id) {
+    if (id.slice(-6) === "-snack") {
+      return [id + "Training", id + "Rest"];
+    }
+    return [id];
+  }
+
+  function isMealDone(id) {
+    return mealKeys(id).some(function (k) {
+      return !!state.completed.menu[k];
+    });
+  }
+
+  function menuEatenCount() {
+    var n = 0;
+    MENU_DAY_CODES.forEach(function (code) {
+      ["breakfast", "lunch", "dinner"].forEach(function (meal) {
+        if (state.completed.menu[code + "-" + meal]) {
+          n++;
+        }
+      });
+      if (state.completed.menu[code + "-snackTraining"] || state.completed.menu[code + "-snackRest"]) {
+        n++; // 训练日/休息日加餐共享一个勾选位，只计 1 次
+      }
+    });
+    return n;
+  }
+
+  function makeMenuCheck() {
+    var check = document.createElement("span");
+    check.className = "menu-check";
+    check.setAttribute("aria-hidden", "true");
+    check.innerHTML = CHECK_SVG;
+    return check;
+  }
+
+  function makeMealRow(id, label, text) {
+    var row = document.createElement("li");
+    row.className = "menu-row";
+    row.setAttribute("role", "checkbox");
+    row.setAttribute("aria-checked", "false");
+    row.setAttribute("aria-label", label + "：" + text);
+    row.tabIndex = 0;
+    row.dataset.id = id;
+
+    row.appendChild(makeMenuCheck());
+
+    var body = document.createElement("div");
+    body.className = "menu-row-body";
+    var lab = document.createElement("span");
+    lab.className = "menu-label";
+    lab.textContent = label;
+    body.appendChild(lab);
+    var p = document.createElement("p");
+    p.className = "menu-text";
+    p.textContent = text;
+    body.appendChild(p);
+    row.appendChild(body);
+
+    row.addEventListener("click", function (e) {
+      if (e.target.closest("button, a")) {
+        return;
+      }
+      handleMealToggle(row, id);
+    });
+    row.addEventListener("keydown", function (e) {
+      if (e.key === "Enter" || e.key === " " || e.key === "Spacebar") {
+        e.preventDefault();
+        handleMealToggle(row, id);
+      }
+    });
+
+    return row;
+  }
+
+  function makeSnackRow(code, snackTraining, snackRest) {
+    var id = code + "-snack";
+    var row = document.createElement("li");
+    row.className = "menu-row menu-row-snack";
+    row.setAttribute("role", "checkbox");
+    row.setAttribute("aria-checked", "false");
+    row.setAttribute("aria-label", "加餐（训练日/休息日共享勾选）");
+    row.tabIndex = 0;
+    row.dataset.id = id;
+
+    row.appendChild(makeMenuCheck());
+
+    var body = document.createElement("div");
+    body.className = "menu-row-body";
+    var grid = document.createElement("div");
+    grid.className = "menu-snack-grid";
+
+    [["训练日加餐", snackTraining], ["休息日加餐", snackRest]].forEach(function (pair) {
+      var item = document.createElement("div");
+      item.className = "menu-snack-item";
+      item.setAttribute("data-snack", pair[0] === "训练日加餐" ? "training" : "rest");
+      var lab = document.createElement("span");
+      lab.className = "menu-snack-label";
+      lab.textContent = pair[0];
+      item.appendChild(lab);
+      var p = document.createElement("p");
+      p.className = "menu-snack-text";
+      p.textContent = pair[1];
+      item.appendChild(p);
+      grid.appendChild(item);
+    });
+
+    body.appendChild(grid);
+    row.appendChild(body);
+
+    row.addEventListener("click", function (e) {
+      if (e.target.closest("button, a")) {
+        return;
+      }
+      handleMealToggle(row, id);
+    });
+    row.addEventListener("keydown", function (e) {
+      if (e.key === "Enter" || e.key === " " || e.key === "Spacebar") {
+        e.preventDefault();
+        handleMealToggle(row, id);
+      }
+    });
+
+    return row;
+  }
+
+  function makeMenuCard(menuItem, code) {
+    var card = document.createElement("article");
+    card.className = "menu-card";
+
+    var head = document.createElement("header");
+    head.className = "menu-card-head";
+    var day = document.createElement("h3");
+    day.className = "menu-day";
+    day.textContent = menuItem.day;
+    head.appendChild(day);
+    var badges = document.createElement("div");
+    badges.className = "menu-badges";
+    menuItem.badges.forEach(function (b) {
+      badges.appendChild(makeBadge(b));
+    });
+    head.appendChild(badges);
+    card.appendChild(head);
+
+    var rows = document.createElement("ul");
+    rows.className = "menu-rows";
+    rows.appendChild(makeMealRow(code + "-breakfast", "早餐", menuItem.breakfast));
+    rows.appendChild(makeMealRow(code + "-lunch", "午餐", menuItem.lunch));
+    rows.appendChild(makeSnackRow(code, menuItem.snackTraining, menuItem.snackRest));
+    rows.appendChild(makeMealRow(code + "-dinner", "晚餐", menuItem.dinner));
+    card.appendChild(rows);
+
+    var foot = document.createElement("footer");
+    foot.className = "menu-card-foot";
+    var water = document.createElement("span");
+    water.className = "menu-water";
+    water.textContent = "训练日 " + menuItem.waterTraining + " · 休息日 " + menuItem.waterRest;
+    foot.appendChild(water);
+    var hint = document.createElement("span");
+    hint.className = "menu-foot-hint";
+    hint.textContent = "少量多次";
+    foot.appendChild(hint);
+    card.appendChild(foot);
+
+    return card;
+  }
+
+  function renderMenu() {
+    var listEl = els.taskList;
+    listEl.textContent = "";
+    var frag = document.createDocumentFragment();
+    WEEKLY_MENU.forEach(function (item, i) {
+      frag.appendChild(makeMenuCard(item, MENU_DAY_CODES[i]));
+    });
+    listEl.appendChild(frag);
+  }
+
+  function renderMenuStates() {
+    if (state.mode !== "menu") {
+      return;
+    }
+    els.taskList.querySelectorAll(".menu-row").forEach(function (row) {
+      var done = isMealDone(row.dataset.id);
+      row.classList.toggle("done", done);
+      row.setAttribute("aria-checked", done ? "true" : "false");
+    });
+  }
+
+  /* ---------------- 渲染：进度 / 预告 / FAB ---------------- */
+
   function renderProgress() {
-    var tasks = tasksOf(state.mode);
-    var total = tasks.length;
-    var done = tasks.filter(function (t) {
-      return !!state.completed[state.mode][t.id];
-    }).length;
+    var total;
+    var done;
+    if (state.mode === "daily") {
+      var tasks = dailyTasks();
+      total = tasks.length;
+      done = tasks.filter(function (t) {
+        return !!state.completed.daily[t.id];
+      }).length;
+      els.progressTrack.setAttribute("aria-label", "每日计划完成进度");
+    } else {
+      total = MENU_TOTAL;
+      done = menuEatenCount();
+      els.progressTrack.setAttribute("aria-label", "每周菜单进度（已吃餐次）");
+    }
     var pct = total ? Math.round((done / total) * 100) : 0;
 
     els.progressText.textContent = done + "/" + total;
@@ -408,13 +626,15 @@
   }
 
   function renderNow() {
-    var tasks = tasksOf(state.mode);
+    if (state.mode !== "daily") {
+      return;
+    }
+    var tasks = dailyTasks();
     var nowMin = timeToMin(formatHM(getNow()));
     var curIdx = currentIndex(tasks, nowMin);
     var card = els.nowCard;
 
     if (curIdx === -1) {
-      /* 早于第一个任务：无当前，显示下一项 */
       var first = tasks[0];
       card.classList.add("is-next");
       card.classList.remove("is-done");
@@ -430,7 +650,7 @@
 
     var cur = tasks[curIdx];
     var next = tasks[curIdx + 1];
-    var done = !!state.completed[state.mode][cur.id];
+    var done = !!state.completed.daily[cur.id];
 
     card.classList.remove("is-next");
     card.classList.toggle("is-done", done);
@@ -445,10 +665,13 @@
   }
 
   function renderFab() {
-    var tasks = tasksOf(state.mode);
-    var nowMin = timeToMin(formatHM(getNow()));
-    var curIdx = currentIndex(tasks, nowMin);
-    els.fab.hidden = curIdx === -1;
+    var hidden = true;
+    if (state.mode === "daily") {
+      var tasks = dailyTasks();
+      var nowMin = timeToMin(formatHM(getNow()));
+      hidden = currentIndex(tasks, nowMin) === -1;
+    }
+    els.fab.hidden = hidden;
   }
 
   function renderDate() {
@@ -472,26 +695,37 @@
   function renderAll() {
     renderDate();
     renderModeButtons();
-    renderList();
-    renderStates();
+    if (state.mode === "daily") {
+      els.nowCard.hidden = false;
+      els.listHeading.textContent = "今日安排";
+      renderList();
+      renderStates();
+    } else {
+      els.nowCard.hidden = true;
+      els.listHeading.textContent = "本周菜单 · 28 餐次";
+      renderMenu();
+      renderMenuStates();
+    }
     renderProgress();
     renderNow();
     renderFab();
     renderClock();
+    mountHaptics();
   }
 
   /**
-   * 常驻跨日检查：页面不关闭、后台过夜时，日期一变就自动清空两个模式的
-   * 完成状态、更新 date 并回写存储。mode 保留。返回是否发生了跨日。
+   * 常驻跨日检查：日期一变就清空两个视图的完成状态、更新 date 并回写存储。
+   * mode 保留。返回是否发生了跨日。
    */
   function ensureToday() {
     var today = localDateKey();
     if (today !== state.date) {
       state.date = today;
-      state.completed = { training: {}, rest: {} };
+      state.completed = { daily: {}, menu: {} };
       persist();
       renderDate();
       renderStates();
+      renderMenuStates();
       renderProgress();
       renderNow();
       renderFab();
@@ -518,8 +752,82 @@
 
   /* ---------------- 交互 ---------------- */
 
+  /* ============ 震动 + 音效集成（与打卡逻辑解耦，任何一方失败不阻断打卡） ============ */
+
+  /** 震动闸门：true=允许转发；false=80ms 内重复通道（label click + switch 合成 click） */
+  function hapticsGate(el) {
+    if (!window.ScheduleHaptics) {
+      return true;
+    }
+    try {
+      return window.ScheduleHaptics.tap(el) !== false;
+    } catch (e) {
+      return true; // 容错：震动模块异常时打卡必须可用
+    }
+  }
+
+  function playSound(type) {
+    if (!window.ScheduleSounds) {
+      return;
+    }
+    try {
+      window.ScheduleSounds.play(type);
+    } catch (e) { /* 静默：音效失败不影响打卡 */ }
+  }
+
+  /** 通用轻触反馈（Tab / 重置 / 回到当前）。返回是否允许继续执行原逻辑。 */
+  function feedbackTick(el) {
+    if (!hapticsGate(el)) {
+      return false;
+    }
+    playSound("tick");
+    return true;
+  }
+
+  /** 每日计划任务卡点击：唯一入口，状态恰好翻转一次 */
+  function handleDailyToggle(el, id) {
+    if (!hapticsGate(el)) {
+      return;
+    }
+    toggleTask(id);
+    playSound(state.completed.daily[id] ? "complete" : "uncomplete");
+  }
+
+  /** 每周菜单餐次行点击：唯一入口（含加餐共享勾选位） */
+  function handleMealToggle(el, id) {
+    if (!hapticsGate(el)) {
+      return;
+    }
+    toggleMeal(id);
+    playSound(isMealDone(id) ? "complete" : "uncomplete");
+  }
+
+  /** 渲染完成后重新挂载震动反馈层（先 destroy 再 mount，避免旧 DOM 泄漏） */
+  function mountHaptics() {
+    if (!window.ScheduleHaptics) {
+      return;
+    }
+    try {
+      window.ScheduleHaptics.destroy();
+      els.modeButtons.forEach(function (b) {
+        window.ScheduleHaptics.mount(b);
+      });
+      window.ScheduleHaptics.mount(els.resetBtn);
+      window.ScheduleHaptics.mount(els.fab);
+      if (state.mode === "daily") {
+        els.taskList.querySelectorAll(".task-card").forEach(function (c) {
+          window.ScheduleHaptics.mount(c);
+        });
+      } else {
+        els.taskList.querySelectorAll(".menu-row").forEach(function (r) {
+          window.ScheduleHaptics.mount(r);
+        });
+      }
+    } catch (e) { /* 静默：震动挂载失败不影响打卡 */ }
+  }
+
   function toggleTask(id) {
-    var map = state.completed[state.mode];
+    var map = state.completed.daily;
     if (map[id]) {
       delete map[id];
     } else {
@@ -529,6 +837,23 @@
     renderStates();
     renderProgress();
     renderNow();
+  }
+
+  function toggleMeal(id) {
+    var keys = mealKeys(id);
+    var done = keys.some(function (k) {
+      return !!state.completed.menu[k];
+    });
+    keys.forEach(function (k) {
+      if (done) {
+        delete state.completed.menu[k];
+      } else {
+        state.completed.menu[k] = true;
+      }
+    });
+    persist();
+    renderMenuStates();
+    renderProgress();
   }
 
   function scrollToTask(id) {
@@ -544,7 +869,7 @@
     els.resetBtn.classList.add("is-armed");
     els.resetBtn.dataset.arm = "1";
     els.resetLabel.textContent = "确认重置?";
-    announce("已进入重置确认：再次点击将清空今日所有打卡");
+    announce("已进入重置确认：再次点击将清空当前视图（" + MODE_LABELS[state.mode] + "）的打卡");
     clearTimeout(resetTimer);
     resetTimer = setTimeout(disarmReset, 3500);
   }
@@ -558,18 +883,19 @@
   }
 
   function resetToday() {
-    state.completed = { training: {}, rest: {} };
+    /* 只清空当前视图，不影响另一个视图 */
+    state.completed[state.mode] = {};
     persist();
     disarmReset();
     renderStates();
+    renderMenuStates();
     renderProgress();
     renderNow();
-    announce("今日打卡已全部重置");
+    announce(MODE_LABELS[state.mode] + "打卡已重置");
   }
 
   function announce(msg) {
     els.announcer.textContent = "";
-    /* 强制重新触发 aria-live */
     window.setTimeout(function () {
       els.announcer.textContent = msg;
     }, 30);
@@ -578,22 +904,23 @@
   function bindEvents() {
     els.modeButtons.forEach(function (btn) {
       btn.addEventListener("click", function () {
+        if (!feedbackTick(btn)) {
+          return;
+        }
         var mode = btn.dataset.mode;
         if (mode !== state.mode) {
           state.mode = mode;
           persist();
-          renderModeButtons();
-          renderList();
-          renderStates();
-          renderProgress();
-          renderNow();
-          renderFab();
+          renderAll();
           announce("已切换到" + MODE_LABELS[mode]);
         }
       });
     });
 
     els.resetBtn.addEventListener("click", function () {
+      if (!feedbackTick(els.resetBtn)) {
+        return;
+      }
       if (els.resetBtn.dataset.arm === "1") {
         resetToday();
       } else {
@@ -602,7 +929,13 @@
     });
 
     els.fab.addEventListener("click", function () {
-      var tasks = tasksOf(state.mode);
+      if (!feedbackTick(els.fab)) {
+        return;
+      }
+      if (state.mode !== "daily") {
+        return;
+      }
+      var tasks = dailyTasks();
       var nowMin = timeToMin(formatHM(getNow()));
       var curIdx = currentIndex(tasks, nowMin);
       if (curIdx > -1) {
@@ -611,19 +944,21 @@
     });
 
     els.nowCard.addEventListener("click", function (e) {
-      if (e.target.closest("button, a")) {
+      if (state.mode !== "daily" || e.target.closest("button, a")) {
         return;
       }
       scrollToTask(els.nowCard.dataset.scrollId);
     });
     els.nowCard.addEventListener("keydown", function (e) {
+      if (state.mode !== "daily") {
+        return;
+      }
       if (e.key === "Enter" || e.key === " " || e.key === "Spacebar") {
         e.preventDefault();
         scrollToTask(els.nowCard.dataset.scrollId);
       }
     });
 
-    /* 回到前台 / 重新聚焦时立即校准 */
     document.addEventListener("visibilitychange", function () {
       if (!document.hidden) {
         tick();
@@ -646,6 +981,7 @@
       progressFill: document.getElementById("progress-fill"),
       progressTrack: document.getElementById("progress-track"),
       taskList: document.getElementById("task-list"),
+      listHeading: document.getElementById("list-heading"),
       nowCard: document.getElementById("now-card"),
       nowStatus: document.getElementById("now-status"),
       nowTime: document.getElementById("now-time"),
@@ -666,7 +1002,8 @@
       storageKey: STORAGE_KEY,
       localDateKey: localDateKey,
       timeToMin: timeToMin,
-      mode: function () { return state.mode; }
+      mode: function () { return state.mode; },
+      menuTotal: MENU_TOTAL
     };
   }
 

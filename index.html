@@ -40,12 +40,12 @@
         </div>
       </div>
 
-      <div class="mode-toggle" id="mode-toggle" role="group" aria-label="日程模式">
-        <button type="button" class="mode-btn" data-mode="training" aria-pressed="false">
-          <span class="mode-dot" aria-hidden="true"></span>运动日
+      <div class="mode-toggle" id="mode-toggle" role="group" aria-label="视图切换">
+        <button type="button" class="mode-btn" data-mode="daily" aria-pressed="false">
+          <span class="mode-dot" aria-hidden="true"></span>每日计划
         </button>
-        <button type="button" class="mode-btn" data-mode="rest" aria-pressed="false">
-          <span class="mode-dot" aria-hidden="true"></span>不运动日
+        <button type="button" class="mode-btn" data-mode="menu" aria-pressed="false">
+          <span class="mode-dot" aria-hidden="true"></span>每周菜单
         </button>
       </div>
 
@@ -91,6 +91,8 @@
     <p class="noscript-tip">此页面需要启用 JavaScript 才能打卡。请开启 Safari 设置中的 JavaScript。</p>
   </noscript>
 
+  <script src="./haptics.js"></script>
+  <script src="./sounds.js"></script>
   <script src="./app.js"></script>
 </body>
 </html>
