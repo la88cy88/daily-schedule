@@ -1,0 +1,5 @@
+# Netlify 部署配置（Netlify Drop 拖拽部署时不需要此文件；
+# 连接 Git 仓库自动构建时读取此配置）
+[build]
+  publish = "."
+  command = ""
