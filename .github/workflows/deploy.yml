@@ -1,0 +1,45 @@
+# 自动部署“一日计划”到 GitHub Pages
+#
+# 触发：push 到 main 分支，或手动在 Actions 页点击 Run workflow
+# 注意：仓库 Settings → Pages 的 Source 必须选择 “GitHub Actions”
+
+name: Deploy to GitHub Pages
+
+on:
+  push:
+    branches: ["main"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+# 同一时间只保留一个部署运行，新提交取消旧运行
+concurrency:
+  group: "pages"
+  cancel-in-progress: true
+
+jobs:
+  deploy:
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Pages
+        uses: actions/configure-pages@v5
+
+      # 整个仓库根目录作为静态站点发布（index.html 位于根目录，
+      # 不做任何排除过滤；tests/、screenshots/、tools/ 一并上传）
+      - name: Upload artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: "."
+
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4
