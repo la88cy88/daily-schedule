@@ -258,8 +258,8 @@ svg {
 /* ---------- 模式切换 ---------- */
 .mode-toggle {
   display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 6px;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 5px;
   margin-top: 10px;
   padding: 4px;
   border-radius: 14px;
@@ -270,18 +270,20 @@ svg {
   display: flex;
   align-items: center;
   justify-content: center;
-  gap: 7px;
+  gap: 5px;
   min-height: 44px;
+  padding: 0 4px;
   border-radius: 11px;
-  font-size: 15px;
+  font-size: 14px;
   font-weight: 600;
   color: var(--muted);
   transition: background 0.18s ease, color 0.18s ease, box-shadow 0.18s ease;
 }
 
 .mode-btn .mode-dot {
-  width: 8px;
-  height: 8px;
+  flex: 0 0 auto;
+  width: 7px;
+  height: 7px;
   border-radius: 50%;
   background: currentColor;
   opacity: 0.5;
@@ -1130,6 +1132,296 @@ textarea.edit-field {
   color: var(--faint);
 }
 
+/* ---------- 喝大水 ---------- */
+.water-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 16px 14px 18px;
+  border-radius: 16px;
+  border: 1px solid var(--line);
+  background: var(--card);
+  box-shadow: var(--shadow);
+}
+
+.water-head {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.water-goal {
+  min-width: 0;
+}
+
+.water-total {
+  display: flex;
+  align-items: baseline;
+  gap: 4px;
+  margin: 0;
+  font-variant-numeric: tabular-nums;
+}
+
+.water-total-num {
+  font-size: 34px;
+  font-weight: 800;
+  line-height: 1;
+  letter-spacing: -0.02em;
+  color: var(--ink);
+}
+
+.water-total-unit {
+  font-size: 15px;
+  font-weight: 700;
+  color: var(--muted);
+}
+
+.water-sub {
+  margin: 6px 0 0;
+  font-size: 12.5px;
+  color: var(--faint);
+  font-variant-numeric: tabular-nums;
+}
+
+.water-stat {
+  display: flex;
+  align-items: baseline;
+  gap: 3px;
+  flex: 0 0 auto;
+  color: var(--accent-strong);
+  font-variant-numeric: tabular-nums;
+}
+
+.water-stat-main {
+  font-size: 15px;
+  font-weight: 700;
+}
+
+.water-stat-unit {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--muted);
+}
+
+.water-track {
+  height: 10px;
+  border-radius: 999px;
+  background: var(--line);
+  overflow: hidden;
+}
+
+.water-fill {
+  height: 100%;
+  width: 0%;
+  border-radius: inherit;
+  background: linear-gradient(90deg, #0284c7, #38bdf8);
+  transition: width 0.3s cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.water-left {
+  margin: 0;
+  font-size: 13px;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.water-left.is-full {
+  color: var(--green);
+  font-weight: 600;
+}
+
+/* 100ml 一杯 */
+.cup-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(52px, 1fr));
+  gap: 8px;
+}
+
+.cup {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 1px;
+  min-height: 56px;
+  border-radius: 12px;
+  border: 1px solid var(--line-strong);
+  background: var(--bg);
+  color: var(--faint);
+  touch-action: manipulation;
+  -webkit-tap-highlight-color: transparent;
+  transition: background 0.15s ease, color 0.15s ease, border-color 0.15s ease, transform 0.06s ease;
+}
+
+.cup svg {
+  width: 17px;
+  height: 17px;
+}
+
+.cup-num {
+  font-size: 11px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+
+.cup.next {
+  border: 2px dashed #0284c7;
+  color: #0284c7;
+  background: rgba(14, 165, 233, 0.08);
+}
+
+.cup.done {
+  border-color: transparent;
+  background: linear-gradient(180deg, #0ea5e9, #0284c7);
+  color: #ffffff;
+}
+
+.cup:active {
+  transform: scale(0.94);
+}
+
+.cup-hint,
+.water-explain {
+  margin: 0;
+  font-size: 11.5px;
+  line-height: 1.55;
+  color: var(--faint);
+}
+
+.water-explain {
+  padding-top: 10px;
+  border-top: 1px dashed var(--line);
+}
+
+/* 编辑态：身高体重年龄 */
+.water-profile {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding-bottom: 12px;
+  border-bottom: 1px dashed var(--line);
+}
+
+.water-fields {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 8px;
+}
+
+.water-field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+
+.water-field-label {
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--muted);
+}
+
+.water-field-input {
+  position: relative;
+  display: flex;
+  align-items: center;
+  min-width: 0;
+}
+
+.water-num {
+  padding-right: 26px;
+  padding-left: 6px;
+  text-align: center;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  -moz-appearance: textfield;
+  appearance: textfield;
+}
+
+/* 隐藏 number 输入框的上下箭头（避免压住单位文字） */
+.water-num::-webkit-outer-spin-button,
+.water-num::-webkit-inner-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+
+.water-field-unit {
+  position: absolute;
+  right: 8px;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--faint);
+  pointer-events: none;
+}
+
+.water-toggle {
+  min-height: 44px;
+  border-radius: 12px;
+  border: 1px solid var(--line-strong);
+  background: var(--bg);
+  color: var(--muted);
+  font-size: 14px;
+  font-weight: 700;
+  touch-action: manipulation;
+  -webkit-tap-highlight-color: transparent;
+  transition: color 0.15s ease, border-color 0.15s ease, background 0.15s ease;
+}
+
+.water-toggle.is-on {
+  border-color: #0284c7;
+  color: #0284c7;
+  background: rgba(14, 165, 233, 0.12);
+}
+
+.water-profile-note {
+  margin: 0;
+  font-size: 11.5px;
+  line-height: 1.5;
+  color: var(--faint);
+}
+
+/* ---------- 每周菜单：编辑态 ---------- */
+.menu-edit-rows {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 12px 14px;
+}
+
+.menu-edit-row {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+
+.menu-edit-label {
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--accent-strong);
+}
+
+.menu-edit-water {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+  padding: 0 14px 14px;
+}
+
+.menu-edit-water-box {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+
+.menu-edit-water-label {
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--muted);
+}
+
 /* ---------- 焦点可见性 ---------- */
 .mode-btn:focus-visible,
 .reset-btn:focus-visible,
@@ -1137,6 +1429,8 @@ textarea.edit-field {
 .edit-bar-restore:focus-visible,
 .icon-btn:focus-visible,
 .add-btn:focus-visible,
+.cup:focus-visible,
+.water-toggle:focus-visible,
 .task-card:focus-visible,
 .menu-row:focus-visible,
 .now-card:focus-visible,
