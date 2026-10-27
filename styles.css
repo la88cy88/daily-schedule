@@ -214,9 +214,33 @@ svg {
   transition: color 0.15s ease, border-color 0.15s ease, background 0.15s ease;
 }
 
+.hdr-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  min-height: 44px;
+  min-width: 44px;
+  padding: 0 11px;
+  border-radius: 12px;
+  border: 1px solid var(--line-strong);
+  background: var(--card);
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 600;
+  transition: color 0.15s ease, border-color 0.15s ease, background 0.15s ease;
+}
+
+.hdr-btn svg,
 .reset-btn svg {
   width: 16px;
   height: 16px;
+}
+
+/* 编辑按钮：编辑态高亮为实心主色，形成明确的模式提示 */
+.edit-btn[aria-pressed="true"] {
+  color: #ffffff;
+  border-color: var(--accent-strong);
+  background: var(--accent-strong);
 }
 
 .reset-btn.is-armed {
@@ -418,6 +442,219 @@ svg {
   background: var(--green-soft);
 }
 
+.now-card.is-ended {
+  border-left-color: var(--line-strong);
+}
+
+.now-card.is-ended .now-status {
+  color: var(--muted);
+  background: var(--line);
+}
+
+/* ---------- 编辑栏 ---------- */
+.edit-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin: 0 0 2px;
+  padding: 10px 12px;
+  border-radius: 12px;
+  border: 1px dashed var(--accent);
+  background: var(--accent-soft);
+  color: var(--accent-strong);
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.edit-bar-text {
+  overflow-wrap: anywhere;
+}
+
+.edit-bar-restore {
+  flex: 0 0 auto;
+  min-height: 32px;
+  padding: 0 10px;
+  border-radius: 9px;
+  border: 1px solid var(--line-strong);
+  background: var(--card);
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 600;
+  transition: color 0.15s ease, border-color 0.15s ease, background 0.15s ease;
+}
+
+.edit-bar-restore.is-armed {
+  color: var(--orange);
+  border-color: var(--orange);
+  background: var(--orange-soft);
+}
+
+/* ---------- 编辑态卡片 ---------- */
+.task-card.is-editing {
+  flex-direction: column;
+  align-items: stretch;
+  gap: 8px;
+  min-width: 0;      /* 防 flex 子项 min-width:auto 被输入框固有宽度撑爆 */
+  max-width: 100%;
+  padding: 11px 11px 11px 12px;
+  cursor: default;
+  border-left-color: var(--accent);
+  -webkit-user-select: auto;
+  user-select: auto;
+}
+
+.task-card.is-editing:active {
+  transform: none;
+}
+
+.edit-time-row {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+}
+
+.edit-dash {
+  flex: 0 0 auto;
+  font-weight: 700;
+  color: var(--faint);
+}
+
+/* 输入控件：16px 字号避免 iOS 聚焦时自动放大页面 */
+.edit-field {
+  width: 100%;
+  min-width: 0;
+  min-height: 42px;
+  padding: 9px 10px;
+  font: inherit;
+  font-size: 16px;
+  line-height: 1.4;
+  color: var(--ink);
+  background: var(--bg);
+  border: 1px solid var(--line-strong);
+  border-radius: 10px;
+  -webkit-appearance: none;
+  appearance: none;
+}
+
+.edit-field::placeholder {
+  color: var(--faint);
+}
+
+.edit-field:focus {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 1px;
+  border-color: var(--focus-ring);
+}
+
+.edit-time-input {
+  flex: 1 1 0;
+  min-width: 0;
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+  font-weight: 700;
+}
+
+textarea.edit-field {
+  min-height: 52px;
+  resize: none;
+  line-height: 1.5;
+  overflow: hidden;
+}
+
+.edit-title-input {
+  font-weight: 700;
+}
+
+.edit-foot-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.edit-cat {
+  flex: 0 0 auto;
+  width: auto;
+  min-width: 92px;
+  padding-right: 26px;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%2364748b' stroke-width='2.4' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M6 9l6 6 6-6'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 8px center;
+  background-size: 14px 14px;
+}
+
+.edit-dur {
+  margin-left: auto;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--faint);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.icon-btn {
+  flex: 0 0 42px;
+  width: 42px;
+  height: 42px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 10px;
+  border: 1px solid var(--line-strong);
+  background: var(--card);
+  color: var(--muted);
+  transition: color 0.15s ease, border-color 0.15s ease, background 0.15s ease;
+}
+
+.icon-btn svg {
+  width: 18px;
+  height: 18px;
+}
+
+.icon-btn.is-armed {
+  color: var(--orange);
+  border-color: var(--orange);
+  background: var(--orange-soft);
+}
+
+/* 新增时段按钮 */
+.add-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  width: 100%;
+  min-height: 50px;
+  border-radius: 14px;
+  border: 1.5px dashed var(--accent);
+  background: transparent;
+  color: var(--accent-strong);
+  font-size: 15px;
+  font-weight: 700;
+  touch-action: manipulation;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.add-btn svg {
+  width: 18px;
+  height: 18px;
+}
+
+.add-btn:active {
+  background: var(--accent-soft);
+}
+
+/* 空状态 */
+.plan-empty {
+  padding: 28px 16px;
+  border-radius: 14px;
+  border: 1px dashed var(--line-strong);
+  text-align: center;
+  font-size: 14px;
+  color: var(--muted);
+  background: var(--card);
+}
+
 /* ---------- 列表标题 ---------- */
 .list-heading {
   margin: 20px 2px 10px;
@@ -508,11 +745,11 @@ svg {
 
 /* ---------- 时间列 ---------- */
 .task-time {
-  flex: 0 0 52px;
+  flex: 0 0 56px;
   display: flex;
   flex-direction: column;
   align-items: flex-end;
-  gap: 5px;
+  gap: 2px;
   padding-top: 1px;
 }
 
@@ -522,6 +759,29 @@ svg {
   font-variant-numeric: tabular-nums;
   color: var(--ink-2);
   letter-spacing: 0.01em;
+}
+
+.task-time .time-end {
+  font-size: 12px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  color: var(--faint);
+  letter-spacing: 0.01em;
+}
+
+.task-time .chip {
+  margin-top: 3px;
+}
+
+/* 时长：meta 行尾部 */
+.dur {
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--faint);
+  background: var(--line);
+  font-variant-numeric: tabular-nums;
 }
 
 /* ---------- 徽章 ---------- */
@@ -873,6 +1133,10 @@ svg {
 /* ---------- 焦点可见性 ---------- */
 .mode-btn:focus-visible,
 .reset-btn:focus-visible,
+.edit-btn:focus-visible,
+.edit-bar-restore:focus-visible,
+.icon-btn:focus-visible,
+.add-btn:focus-visible,
 .task-card:focus-visible,
 .menu-row:focus-visible,
 .now-card:focus-visible,

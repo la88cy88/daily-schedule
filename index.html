@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <meta name="color-scheme" content="light dark">
   <meta name="format-detection" content="telephone=no">
-  <meta name="description" content="考研 + 力量训练一日时间表打卡：点击任务卡完成打卡，自动高亮当前时间段，按日期自动重置，适配 iPhone Safari 与主屏幕 PWA。">
+  <meta name="description" content="考研 + 力量训练一日时间表打卡：可自定义时间段与内容，点击任务卡完成打卡，自动高亮当前时间段，按日期自动重置，适配 iPhone Safari 与主屏幕 PWA。">
 
   <title>一日计划</title>
 
@@ -21,7 +21,7 @@
   <meta name="theme-color" content="#ffffff" media="(prefers-color-scheme: light)">
   <meta name="theme-color" content="#0b1220" media="(prefers-color-scheme: dark)">
 
-  <link rel="stylesheet" href="./styles.css">
+  <link rel="stylesheet" href="./styles.css?v=3">
 </head>
 <body>
   <header class="app-header" id="app-header">
@@ -33,7 +33,11 @@
         </div>
         <div class="header-right">
           <time class="app-clock" id="app-clock" aria-label="当前时间">--:--</time>
-          <button type="button" id="reset-btn" class="reset-btn" aria-label="重置今天">
+          <button type="button" id="edit-btn" class="hdr-btn edit-btn" aria-pressed="false" aria-label="编辑计划时段">
+            <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M4 20h4l10-10a2.5 2.5 0 0 0-3.5-3.5L4.5 16.5 4 20z" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+            <span id="edit-btn-label">编辑</span>
+          </button>
+          <button type="button" id="reset-btn" class="hdr-btn reset-btn" aria-label="重置今天">
             <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M4.5 12a7.5 7.5 0 1 0 2.2-5.3M4.5 4v4h4" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
             <span id="reset-btn-label">重置</span>
           </button>
@@ -76,6 +80,11 @@
       </div>
     </section>
 
+    <div class="edit-bar" id="edit-bar" hidden>
+      <span class="edit-bar-text">编辑模式 · 可改时间段与内容</span>
+      <button type="button" class="edit-bar-restore" id="restore-btn">恢复默认</button>
+    </div>
+
     <h2 class="list-heading" id="list-heading">今日安排</h2>
     <div class="task-list" id="task-list" aria-label="任务列表"></div>
   </main>
@@ -91,8 +100,8 @@
     <p class="noscript-tip">此页面需要启用 JavaScript 才能打卡。请开启 Safari 设置中的 JavaScript。</p>
   </noscript>
 
-  <script src="./haptics.js"></script>
-  <script src="./sounds.js"></script>
-  <script src="./app.js"></script>
+  <script src="./haptics.js?v=3"></script>
+  <script src="./sounds.js?v=3"></script>
+  <script src="./app.js?v=3"></script>
 </body>
 </html>

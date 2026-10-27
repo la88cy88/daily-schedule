@@ -1,27 +1,44 @@
 /* =========================================================
  * 一日计划 · 考研时间表 + 每周菜单打卡
  * 纯原生 JS，无依赖。状态持久化：localStorage
- * key: kaoyan-daily-schedule-v1（schema version 2）
+ * key: kaoyan-daily-schedule-v1（schema version 3）
  *
  * 双视图（Tab）：
- *   daily —— 每日计划：35 项时间表（t- 前缀），当前高亮/已过徽章/回到当前
+ *   daily —— 每日计划：默认 35 个「时间段」（t- 前缀），可自定义增删改
  *   menu  —— 每周菜单：7 天 × 4 餐 = 28 餐次（训练日/休息日加餐共享一个勾选位）
  *
- * 旧数据迁移（version 1 → 2，不报错、不丢每日计划数据）：
- *   mode "training" → "daily"，completed.training → completed.daily
- *   mode "rest"     → "menu"，completed.rest 直接丢弃，completed.menu 初始化为空
+ * 编辑态（v3 新增）：
+ *   默认只读，点右上角「编辑」才进入编辑态；编辑态下每张卡变成
+ *   时间段表单（开始时间 / 结束时间 / 做什么 / 备注 / 分类 / 删除），
+ *   列表底部有「＋ 添加时间段」。点「完成」后自动按开始时间排序并保存。
+ *   编辑态不持久化：重新打开页面永远是只读视图。
+ *
+ * 数据模型：每个时段 { id, start:"HH:MM", end:"HH:MM", title, details, category, badges }
+ *   当前高亮 = start <= now < end；end <= now 视为已过。
+ *
+ * 旧数据迁移（全部容错，不丢打卡）
+ *   v1 mode training/rest → daily/menu，completed.training → completed.daily
+ *   v2 无 schedule 字段 → 由默认 TRAINING 推导 start/end
  * ========================================================= */
 (function () {
   "use strict";
 
-  /* ---------------- 常量与任务数据 ---------------- */
+  /* ---------------- 常量 ---------------- */
 
   var STORAGE_KEY = "kaoyan-daily-schedule-v1";
-  var STORAGE_VERSION = 2;
+  var STORAGE_VERSION = 3;
   var MODES = ["daily", "menu"];
   var MODE_LABELS = { daily: "每日计划", menu: "每周菜单" };
 
-  /** 每日计划（沿用原 training 数组，t- 前缀 35 项） */
+  /** 可选的分类（与 styles.css 的 .cat[data-cat] 一一对应） */
+  var CATEGORIES = ["学习", "饮食", "饮水", "训练", "休息", "健康", "睡眠"];
+
+  /** 新增时段默认时长（分钟） */
+  var DEFAULT_DURATION = 30;
+
+  /* ---------------- 默认任务数据（只作为默认时段的来源） ---------------- */
+
+  /** 每日计划默认项（沿用原 training 数组，t- 前缀 35 项；只有开始时间，结束时间由下一条推导） */
   var TRAINING = [
     {id:"t-0650",time:"06:50",title:"起床",details:"醒后坐10秒再站，不猛然起身",category:"健康",badges:["血压"]},
     {id:"t-0700",time:"07:00",title:"第一口水 300ml",details:"温水，分3-5分钟小口慢饮，不猛灌",category:"饮水",badges:[]},
@@ -116,12 +133,57 @@
     return String(n).padStart(2, "0");
   }
 
+  function minToTime(m) {
+    var v = Math.max(0, Math.min(23 * 60 + 59, m));
+    return pad2(Math.floor(v / 60)) + ":" + pad2(v % 60);
+  }
+
+  /** 合法 "HH:MM" → 原值；否则 null */
+  function validTime(t) {
+    if (typeof t !== "string") {
+      return null;
+    }
+    var v = t.trim();
+    if (!/^([01]\d|2[0-3]):([0-5]\d)$/.test(v)) {
+      return null;
+    }
+    return v;
+  }
+
+  /** 开始时间 + 分钟数（不超过 23:59） */
+  function addMinutes(start, mins) {
+    return minToTime(timeToMin(start) + mins);
+  }
+
   function formatHM(d) {
     return pad2(d.getHours()) + ":" + pad2(d.getMinutes());
   }
 
   function weekdayCN(d) {
     return ["周日", "周一", "周二", "周三", "周四", "周五", "周六"][d.getDay()];
+  }
+
+  /** 时间段时长（分钟），跨零点按 +1 天算 */
+  function durMin(start, end) {
+    var m = timeToMin(end) - timeToMin(start);
+    if (m <= 0) {
+      m += 24 * 60;
+    }
+    return m;
+  }
+
+  /** "1 小时 30 分" 形式的时长文案 */
+  function durText(start, end) {
+    var m = durMin(start, end);
+    var h = Math.floor(m / 60);
+    var r = m % 60;
+    if (h && r) {
+      return h + " 小时 " + r + " 分";
+    }
+    if (h) {
+      return h + " 小时";
+    }
+    return m + " 分钟";
   }
 
   /* ---------------- 存储（全部 try/catch） ---------------- */
@@ -140,21 +202,101 @@
       window.localStorage.setItem(STORAGE_KEY, value);
       return true;
     } catch (e) {
-      console.warn("[一日计划] localStorage 写入失败，状态仅保存在内存中。", e);
+      console.warn("[一日计划] 一日计划写入失败，状态仅保存在内存中。", e);
       return false;
     }
   }
+
+  /* ---------------- 时段数据：默认值 / 校验 / 排序 ---------------- */
+
+  function newId() {
+    return "c-" + Date.now().toString(36) + "-" + Math.random().toString(36).slice(2, 6);
+  }
+
+  /** 由默认 TRAINING 推导时间段：start = time，end = 下一条的 time（末条到 23:59） */
+  function buildDefaultSchedule() {
+    return TRAINING.map(function (item, i) {
+      var next = TRAINING[i + 1];
+      return {
+        id: item.id,
+        start: item.time,
+        end: next ? next.time : "23:59",
+        title: item.title,
+        details: item.details,
+        category: item.category,
+        badges: item.badges.slice()
+      };
+    });
+  }
+
+  /** 校验并修补单个时段；时间非法则返回 null（丢弃该条） */
+  function sanitizeItem(raw, index, seen) {
+    if (!raw || typeof raw !== "object") {
+      return null;
+    }
+    var start = validTime(raw.start) || validTime(raw.time);
+    if (!start) {
+      return null;
+    }
+    var end = validTime(raw.end);
+    if (!end || (timeToMin(end) - timeToMin(start)) <= 0) {
+      end = addMinutes(start, DEFAULT_DURATION);
+    }
+    var id = typeof raw.id === "string" && raw.id && !seen[raw.id]
+      ? raw.id
+      : "c-" + (index + 1) + "-" + Math.random().toString(36).slice(2, 6);
+    seen[id] = true;
+
+    var title = typeof raw.title === "string" ? raw.title.replace(/\s+$/, "") : "";
+    return {
+      id: id,
+      start: start,
+      end: end,
+      title: title,
+      details: typeof raw.details === "string" ? raw.details : "",
+      category: CATEGORIES.indexOf(raw.category) > -1 ? raw.category : "学习",
+      badges: Array.isArray(raw.badges) ? raw.badges.filter(function (b) {
+        return typeof b === "string" && b;
+      }) : []
+    };
+  }
+
+  function sanitizeSchedule(raw) {
+    if (!Array.isArray(raw)) {
+      return null;
+    }
+    var seen = {};
+    var out = [];
+    raw.forEach(function (item, i) {
+      var clean = sanitizeItem(item, i, seen);
+      if (clean) {
+        out.push(clean);
+      }
+    });
+    return out;
+  }
+
+  /** 按开始时间排序（同开始时间按结束时间），并写回 state */
+  function sortSchedule() {
+    state.schedule.sort(function (a, b) {
+      var d = timeToMin(a.start) - timeToMin(b.start);
+      return d !== 0 ? d : timeToMin(a.end) - timeToMin(b.end);
+    });
+  }
+
+  /* ---------------- 状态 ---------------- */
 
   function defaultState() {
     return {
       version: STORAGE_VERSION,
       date: localDateKey(),
       mode: "daily",
-      completed: { daily: {}, menu: {} }
+      completed: { daily: {}, menu: {} },
+      schedule: buildDefaultSchedule()
     };
   }
 
-  /* -------- 旧数据迁移（version 1 → 2，必须不报错） -------- */
+  /* -------- 旧数据迁移（v1/v2 → v3，必须不报错） -------- */
 
   /** mode 映射："training"→"daily"，"rest"→"menu"，其余非法值回退 "daily" */
   function normalizeMode(m) {
@@ -203,45 +345,72 @@
     var today = localDateKey();
     if (parsed && typeof parsed === "object") {
       state.mode = normalizeMode(parsed.mode);
-      // 日期不是今天：两个视图的完成状态全部清空，mode 保留
+      // 日期不是今天：两个视图的完成状态全部清空，mode 与自定义时段保留
       if (parsed.date === today) {
         state.completed = normalizeCompleted(parsed.completed);
+      }
+      // 自定义时段：缺失或损坏时用默认计划；空数组视为用户主动清空，予以保留
+      var schedule = sanitizeSchedule(parsed.schedule);
+      if (schedule) {
+        state.schedule = schedule;
       }
     }
     return state;
   }
 
+  var state = loadState();
+
   function persist() {
     storageSet(JSON.stringify(state));
   }
 
-  /* ---------------- 状态 ---------------- */
-
-  var state = loadState();
-  persist(); // 启动即回写：跨日重置结果 + v1→v2 迁移后的新结构
+  persist(); // 启动即回写：跨日重置结果 + 迁移后的新结构
 
   var els = {};
+  var editing = false;          // 编辑态：只在内存中，刷新后回到只读
   var lastRenderedHM = "";
   var resetTimer = null;
+  var restoreTimer = null;
+  var armedDelete = { btn: null, id: null, timer: null };
+  var persistTimer = null;
+  var focusAfterRender = null;  // 新增时段后要聚焦的 id
+  var pendingScrollId = null;   // 新增时段后要滚动到的 id
 
   function dailyTasks() {
-    return TRAINING;
+    return state.schedule;
   }
 
-  /**
-   * 当前时间段索引（仅每日计划）：最后一个 start <= now 的任务；
-   * 早于首个任务返回 -1；最后一个任务持续至 23:59。
-   */
-  function currentIndex(tasks, nowMin) {
-    var idx = -1;
+  /** 单个时段相对现在的位置：past / current / future */
+  function statusOf(item, nowMin) {
+    var s = timeToMin(item.start);
+    var e = timeToMin(item.end);
+    if (e <= s) {
+      e += 24 * 60; // 跨零点
+    }
+    if (nowMin < s) {
+      return "future";
+    }
+    return nowMin < e ? "current" : "past";
+  }
+
+  /** 当前时段（多个重叠时取第一个）；没有则 null */
+  function findCurrent(tasks, nowMin) {
     for (var i = 0; i < tasks.length; i++) {
-      if (nowMin >= timeToMin(tasks[i].time)) {
-        idx = i;
-      } else {
-        break;
+      if (statusOf(tasks[i], nowMin) === "current") {
+        return tasks[i];
       }
     }
-    return idx;
+    return null;
+  }
+
+  /** 下一个尚未开始的时段；没有则 null */
+  function findNext(tasks, nowMin) {
+    for (var i = 0; i < tasks.length; i++) {
+      if (timeToMin(tasks[i].start) > nowMin) {
+        return tasks[i];
+      }
+    }
+    return null;
   }
 
   /* ---------------- 渲染：通用小件 ---------------- */
@@ -291,24 +460,29 @@
   }
 
   var CHECK_SVG = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12.5l4.2 4.2L19 7.5"/></svg>';
+  var TRASH_SVG = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 7h16M9.5 7V5h5v2M6.5 7l.8 12.2A1.8 1.8 0 0 0 9.1 21h5.8a1.8 1.8 0 0 0 1.8-1.8L17.5 7M10.5 11v6M13.5 11v6"/></svg>';
 
-  /* ---------------- 渲染：每日计划 ---------------- */
+  /* ---------------- 渲染：每日计划（只读视图） ---------------- */
 
-  function makeCard(task) {
+  function makeCard(item) {
     var card = document.createElement("article");
     card.className = "task-card";
     card.setAttribute("role", "checkbox");
     card.setAttribute("aria-checked", "false");
-    card.setAttribute("aria-label", task.time + " " + task.title);
+    card.setAttribute("aria-label", item.start + " 至 " + item.end + " " + item.title);
     card.tabIndex = 0;
-    card.dataset.id = task.id;
+    card.dataset.id = item.id;
 
     var timeCol = document.createElement("div");
     timeCol.className = "task-time";
     var timeEl = document.createElement("span");
     timeEl.className = "time";
-    timeEl.textContent = task.time;
+    timeEl.textContent = item.start;
     timeCol.appendChild(timeEl);
+    var endEl = document.createElement("span");
+    endEl.className = "time-end";
+    endEl.textContent = "– " + item.end;
+    timeCol.appendChild(endEl);
     timeCol.appendChild(makeChip("已过", "chip-past"));
     card.appendChild(timeCol);
 
@@ -319,7 +493,7 @@
     titleRow.className = "task-title-row";
     var title = document.createElement("h3");
     title.className = "task-title";
-    title.textContent = task.title;
+    title.textContent = item.title || "未命名时段";
     titleRow.appendChild(title);
     titleRow.appendChild(makeChip("当前", "chip-current"));
     body.appendChild(titleRow);
@@ -328,18 +502,22 @@
     meta.className = "task-meta";
     var cat = document.createElement("span");
     cat.className = "cat";
-    cat.setAttribute("data-cat", task.category);
-    cat.textContent = task.category;
+    cat.setAttribute("data-cat", item.category);
+    cat.textContent = item.category;
     meta.appendChild(cat);
-    task.badges.forEach(function (b) {
+    item.badges.forEach(function (b) {
       meta.appendChild(makeBadge(b));
     });
+    var dur = document.createElement("span");
+    dur.className = "dur";
+    dur.textContent = durText(item.start, item.end);
+    meta.appendChild(dur);
     body.appendChild(meta);
 
-    if (task.details) {
+    if (item.details) {
       var details = document.createElement("p");
       details.className = "task-details";
-      details.textContent = task.details;
+      details.textContent = item.details;
       body.appendChild(details);
     }
     card.appendChild(body);
@@ -351,20 +529,197 @@
     card.appendChild(check);
 
     card.addEventListener("click", function (e) {
-      if (e.target.closest("button, a")) {
+      if (editing || e.target.closest("button, a, input, textarea, select")) {
         return;
       }
-      handleDailyToggle(task.id);
+      handleDailyToggle(item.id);
     });
 
     card.addEventListener("keydown", function (e) {
+      if (editing) {
+        return;
+      }
       if (e.key === "Enter" || e.key === " " || e.key === "Spacebar") {
         e.preventDefault();
-        handleDailyToggle(task.id);
+        handleDailyToggle(item.id);
       }
     });
 
     return card;
+  }
+
+  /* ---------------- 渲染：每日计划（编辑态表单） ---------------- */
+
+  function makeFieldInput(field, value, placeholder, cls) {
+    var input = document.createElement("input");
+    input.type = "text";
+    input.className = "edit-field" + (cls ? " " + cls : "");
+    input.value = value || "";
+    input.placeholder = placeholder;
+    input.dataset.field = field;
+    input.setAttribute("autocomplete", "off");
+    input.setAttribute("autocapitalize", "off");
+    input.setAttribute("spellcheck", "false");
+    return input;
+  }
+
+  function makeEditCard(item) {
+    var card = document.createElement("article");
+    card.className = "task-card is-editing";
+    card.dataset.id = item.id;
+
+    /* 时间段：开始 — 结束 — 删除 */
+    var timeRow = document.createElement("div");
+    timeRow.className = "edit-time-row";
+
+    var startInput = document.createElement("input");
+    startInput.type = "time";
+    startInput.className = "edit-field edit-time-input";
+    startInput.value = item.start;
+    startInput.dataset.field = "start";
+    startInput.setAttribute("aria-label", "开始时间");
+
+    var dash = document.createElement("span");
+    dash.className = "edit-dash";
+    dash.textContent = "—";
+
+    var endInput = document.createElement("input");
+    endInput.type = "time";
+    endInput.className = "edit-field edit-time-input";
+    endInput.value = item.end;
+    endInput.dataset.field = "end";
+    endInput.setAttribute("aria-label", "结束时间");
+
+    var del = document.createElement("button");
+    del.type = "button";
+    del.className = "icon-btn edit-del";
+    del.setAttribute("aria-label", "删除这个时段，需点两次确认");
+    del.innerHTML = TRASH_SVG;
+    del.addEventListener("click", function (e) {
+      e.stopPropagation();
+      handleDelete(del, item.id);
+    });
+
+    timeRow.appendChild(startInput);
+    timeRow.appendChild(dash);
+    timeRow.appendChild(endInput);
+    timeRow.appendChild(del);
+
+    /* 做什么 */
+    var titleInput = makeFieldInput("title", item.title, "做什么？例如：背单词 / 力量训练", "edit-title-input");
+    titleInput.setAttribute("data-focus-id", item.id);
+
+    /* 备注 */
+    var detailsInput = document.createElement("textarea");
+    detailsInput.className = "edit-field";
+    detailsInput.rows = 2;
+    detailsInput.value = item.details || "";
+    detailsInput.placeholder = "备注（可选）";
+    detailsInput.dataset.field = "details";
+
+    /* 分类 + 时长 */
+    var footRow = document.createElement("div");
+    footRow.className = "edit-foot-row";
+
+    var select = document.createElement("select");
+    select.className = "edit-field edit-cat";
+    select.dataset.field = "category";
+    select.setAttribute("aria-label", "分类");
+    CATEGORIES.forEach(function (c) {
+      var opt = document.createElement("option");
+      opt.value = c;
+      opt.textContent = c;
+      select.appendChild(opt);
+    });
+    select.value = item.category;
+
+    var durEl = document.createElement("span");
+    durEl.className = "edit-dur";
+    durEl.textContent = durText(item.start, item.end);
+
+    footRow.appendChild(select);
+    footRow.appendChild(durEl);
+
+    card.appendChild(timeRow);
+    card.appendChild(titleInput);
+    card.appendChild(detailsInput);
+    card.appendChild(footRow);
+
+    /* 文本类字段：边输边存（不重绘，避免丢焦点） */
+    card.addEventListener("input", function (e) {
+      var field = e.target.dataset ? e.target.dataset.field : null;
+      if (field === "title") {
+        item.title = e.target.value;
+        schedulePersist();
+      } else if (field === "details") {
+        item.details = e.target.value;
+        autoGrow(e.target);
+        schedulePersist();
+      }
+    });
+
+    /* 时间 / 分类：失焦或选定后提交并纠正非法区间 */
+    card.addEventListener("change", function (e) {
+      var field = e.target.dataset ? e.target.dataset.field : null;
+      if (field === "start" || field === "end") {
+        commitTime(item, field, e.target.value, startInput, endInput, durEl);
+      } else if (field === "category") {
+        item.category = e.target.value;
+        schedulePersist();
+      }
+    });
+
+    return card;
+  }
+
+  /** 提交时间修改：保证 end > start，非法输入回退 */
+  function commitTime(item, field, value, startInput, endInput, durEl) {
+    var v = validTime(value);
+    if (!v) {
+      startInput.value = item.start;
+      endInput.value = item.end;
+      announce("时间格式不对，已还原");
+      return;
+    }
+    if (field === "start") {
+      item.start = v;
+      if (timeToMin(item.end) <= timeToMin(v)) {
+        item.end = addMinutes(v, DEFAULT_DURATION);
+      }
+    } else {
+      item.end = v;
+      if (timeToMin(v) <= timeToMin(item.start)) {
+        item.end = addMinutes(item.start, DEFAULT_DURATION);
+      }
+    }
+    startInput.value = item.start;
+    endInput.value = item.end;
+    durEl.textContent = durText(item.start, item.end);
+    schedulePersist();
+    announce("已改为 " + item.start + " — " + item.end);
+  }
+
+  function autoGrow(ta) {
+    try {
+      ta.style.height = "auto";
+      ta.style.height = Math.max(52, ta.scrollHeight) + "px";
+    } catch (e) { /* 忽略 */ }
+  }
+
+  function growTextareas(root) {
+    Array.prototype.forEach.call(root.querySelectorAll("textarea.edit-field"), autoGrow);
+  }
+
+  function makeAddButton() {
+    var btn = document.createElement("button");
+    btn.type = "button";
+    btn.className = "add-btn";
+    btn.innerHTML = '<svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M12 5v14M5 12h14" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"/></svg><span>添加时间段</span>';
+    btn.addEventListener("click", function () {
+      playSound("tick");
+      addItem();
+    });
+    return btn;
   }
 
   function renderList() {
@@ -372,40 +727,86 @@
     listEl.textContent = "";
     var tasks = dailyTasks();
     var frag = document.createDocumentFragment();
-    var lastPart = null;
-    tasks.forEach(function (task) {
-      var part = partOf(task.time);
-      if (part !== lastPart) {
-        lastPart = part;
-        frag.appendChild(makePartHeader(part));
-      }
-      frag.appendChild(makeCard(task));
-    });
+
+    if (!tasks.length) {
+      var empty = document.createElement("div");
+      empty.className = "plan-empty";
+      empty.textContent = editing
+        ? "还没有任何时段。点下面的「添加时间段」开始安排。"
+        : "还没有任何安排。点右上角「编辑」就能添加时间段。";
+      frag.appendChild(empty);
+    } else if (editing) {
+      tasks.forEach(function (item) {
+        frag.appendChild(makeEditCard(item));
+      });
+    } else {
+      var lastPart = null;
+      tasks.forEach(function (item) {
+        var part = partOf(item.start);
+        if (part !== lastPart) {
+          lastPart = part;
+          frag.appendChild(makePartHeader(part));
+        }
+        frag.appendChild(makeCard(item));
+      });
+    }
+
+    if (editing) {
+      frag.appendChild(makeAddButton());
+    }
+
     listEl.appendChild(frag);
+    growTextareas(listEl);
+
+    if (focusAfterRender) {
+      var target = listEl.querySelector('[data-focus-id="' + focusAfterRender + '"]');
+      focusAfterRender = null;
+      if (target) {
+        try {
+          target.focus({ preventScroll: true });
+        } catch (e) {
+          target.focus();
+        }
+      }
+    }
+    if (pendingScrollId) {
+      var scrollTarget = listEl.querySelector('[data-id="' + pendingScrollId + '"]');
+      pendingScrollId = null;
+      if (scrollTarget) {
+        safeScrollIntoView(scrollTarget);
+      }
+    }
   }
 
   function renderStates() {
-    if (state.mode !== "daily") {
+    if (state.mode !== "daily" || editing) {
       return;
     }
     var tasks = dailyTasks();
     var nowMin = timeToMin(formatHM(getNow()));
-    var curIdx = currentIndex(tasks, nowMin);
-    var cards = els.taskList.querySelectorAll(".task-card");
+    var map = {};
+    tasks.forEach(function (t) {
+      map[t.id] = statusOf(t, nowMin);
+    });
 
-    cards.forEach(function (card, i) {
+    els.taskList.querySelectorAll(".task-card").forEach(function (card) {
       var id = card.dataset.id;
+      var st = map[id] || "future";
       var done = !!state.completed.daily[id];
-      var isCurrent = i === curIdx;
-      var isPast = curIdx > -1 && i < curIdx;
 
       card.classList.toggle("done", done);
-      card.classList.toggle("current", isCurrent);
-      card.classList.toggle("past", !done && isPast);
+      card.classList.toggle("current", st === "current");
+      card.classList.toggle("past", !done && st === "past");
       card.setAttribute("aria-checked", done ? "true" : "false");
 
-      card.querySelector(".chip-current").hidden = !isCurrent;
-      card.querySelector(".chip-past").hidden = !(!done && isPast);
+      var chipCur = card.querySelector(".chip-current");
+      var chipPast = card.querySelector(".chip-past");
+      if (chipCur) {
+        chipCur.hidden = st !== "current";
+      }
+      if (chipPast) {
+        chipPast.hidden = !(!done && st === "past");
+      }
     });
   }
 
@@ -600,7 +1001,7 @@
     });
   }
 
-  /* ---------------- 渲染：进度 / 预告 / FAB ---------------- */
+  /* ---------------- 渲染：进度 / 预告 / FAB / 编辑态 ---------------- */
 
   function renderProgress() {
     var total;
@@ -626,50 +1027,68 @@
   }
 
   function renderNow() {
-    if (state.mode !== "daily") {
+    if (state.mode !== "daily" || editing) {
       return;
     }
     var tasks = dailyTasks();
-    var nowMin = timeToMin(formatHM(getNow()));
-    var curIdx = currentIndex(tasks, nowMin);
     var card = els.nowCard;
 
-    if (curIdx === -1) {
-      var first = tasks[0];
-      card.classList.add("is-next");
-      card.classList.remove("is-done");
-      card.dataset.scrollId = first.id;
-      card.setAttribute("aria-label", "下一项任务 " + first.time + " " + first.title + "，点击定位");
-      els.nowStatus.textContent = "下一项";
-      els.nowTime.textContent = first.time;
-      els.nowTitle.textContent = first.title;
-      els.nowDetails.textContent = first.details;
-      els.nowMeta.textContent = MODE_LABELS[state.mode] + " · 今日尚未开始";
+    if (!tasks.length) {
+      card.hidden = true;
+      return;
+    }
+    card.hidden = false;
+
+    var nowMin = timeToMin(formatHM(getNow()));
+    var cur = findCurrent(tasks, nowMin);
+
+    card.classList.remove("is-next", "is-done", "is-ended");
+
+    if (cur) {
+      var done = !!state.completed.daily[cur.id];
+      card.classList.toggle("is-done", done);
+      card.dataset.scrollId = cur.id;
+      card.setAttribute("aria-label", "当前时段 " + cur.start + " " + cur.title + "，点击定位");
+      els.nowStatus.textContent = done ? "当前 · 已完成" : "当前";
+      els.nowTime.textContent = cur.start;
+      els.nowTitle.textContent = cur.title || "未命名时段";
+      els.nowDetails.textContent = cur.details || "";
+      els.nowMeta.textContent = "进行至 " + cur.end + " · 共 " + durText(cur.start, cur.end);
       return;
     }
 
-    var cur = tasks[curIdx];
-    var next = tasks[curIdx + 1];
-    var done = !!state.completed.daily[cur.id];
+    var next = findNext(tasks, nowMin);
+    if (next) {
+      card.classList.add("is-next");
+      card.dataset.scrollId = next.id;
+      card.setAttribute("aria-label", "下一项 " + next.start + " " + next.title + "，点击定位");
+      els.nowStatus.textContent = "下一项";
+      els.nowTime.textContent = next.start;
+      els.nowTitle.textContent = next.title || "未命名时段";
+      els.nowDetails.textContent = next.details || "";
+      var gap = timeToMin(next.start) - nowMin;
+      els.nowMeta.textContent = "还有 " + gap + " 分钟开始 · 至 " + next.end;
+      return;
+    }
 
-    card.classList.remove("is-next");
-    card.classList.toggle("is-done", done);
-    card.dataset.scrollId = cur.id;
-    card.setAttribute("aria-label", "当前任务 " + cur.time + " " + cur.title + "，点击定位");
-
-    els.nowStatus.textContent = done ? "当前 · 已完成" : "当前";
-    els.nowTime.textContent = cur.time;
-    els.nowTitle.textContent = cur.title;
-    els.nowDetails.textContent = cur.details || "";
-    els.nowMeta.textContent = "进行至 " + (next ? next.time : "23:59");
+    /* 全部时段都已结束 */
+    var last = tasks[tasks.length - 1];
+    card.classList.add("is-ended");
+    card.dataset.scrollId = last.id;
+    card.setAttribute("aria-label", "今日安排已结束，最后一项 " + last.title);
+    els.nowStatus.textContent = "已结束";
+    els.nowTime.textContent = last.end;
+    els.nowTitle.textContent = "今日安排已走完";
+    els.nowDetails.textContent = "";
+    els.nowMeta.textContent = "共 " + tasks.length + " 个时段 · 点「编辑」可继续调整";
   }
 
   function renderFab() {
     var hidden = true;
-    if (state.mode === "daily") {
+    if (state.mode === "daily" && !editing) {
       var tasks = dailyTasks();
       var nowMin = timeToMin(formatHM(getNow()));
-      hidden = currentIndex(tasks, nowMin) === -1;
+      hidden = !findCurrent(tasks, nowMin);
     }
     els.fab.hidden = hidden;
   }
@@ -692,13 +1111,27 @@
     lastRenderedHM = els.appClock.textContent;
   }
 
+  /** 编辑按钮 / 编辑栏 的显隐与文案 */
+  function renderEditUi() {
+    var editable = state.mode === "daily";
+    if (!editable && editing) {
+      editing = false; // 切到菜单视图时自动退出编辑态
+    }
+    els.editBtn.hidden = !editable;
+    els.editBtn.setAttribute("aria-pressed", editing ? "true" : "false");
+    els.editLabel.textContent = editing ? "完成" : "编辑";
+    els.editBar.hidden = !(editable && editing);
+    document.body.classList.toggle("is-editing", editable && editing);
+  }
+
   function renderAll() {
-    detachHaptics(); // 重绘前：旧节点 detach，防 label/switch 累积
+    detachHaptics(); // 重绘前：旧节点 detach，防止 label/switch 累积
     renderDate();
     renderModeButtons();
+    renderEditUi();
     if (state.mode === "daily") {
-      els.nowCard.hidden = false;
-      els.listHeading.textContent = "今日安排";
+      els.nowCard.hidden = editing;
+      els.listHeading.textContent = editing ? "编辑今日安排" : "今日安排";
       renderList();
       renderStates();
     } else {
@@ -716,7 +1149,7 @@
 
   /**
    * 常驻跨日检查：日期一变就清空两个视图的完成状态、更新 date 并回写存储。
-   * mode 保留。返回是否发生了跨日。
+   * mode 与自定义时段保留。返回是否发生了跨日。
    */
   function ensureToday() {
     var today = localDateKey();
@@ -743,7 +1176,7 @@
     if (dayChanged || hm !== lastRenderedHM) {
       lastRenderedHM = hm;
       els.appClock.textContent = hm;
-      if (!dayChanged) {
+      if (!dayChanged && !editing) {
         renderStates();
         renderNow();
         renderFab();
@@ -809,8 +1242,16 @@
         window.ScheduleHaptics.attach(b);
       });
       window.ScheduleHaptics.attach(els.resetBtn);
+      window.ScheduleHaptics.attach(els.editBtn);
+      window.ScheduleHaptics.attach(els.restoreBtn);
       window.ScheduleHaptics.attach(els.fab);
-      if (state.mode === "daily") {
+      if (editing) {
+        /* 编辑态卡片里是输入控件，不挂震动层（透明 label 会挡住点击） */
+        var addBtn = els.taskList.querySelector(".add-btn");
+        if (addBtn) {
+          window.ScheduleHaptics.attach(addBtn);
+        }
+      } else if (state.mode === "daily") {
         els.taskList.querySelectorAll(".task-card").forEach(function (c) {
           window.ScheduleHaptics.attach(c);
         });
@@ -857,8 +1298,150 @@
     if (!el) {
       return false;
     }
-    el.scrollIntoView({ behavior: "smooth", block: "center" });
+    safeScrollIntoView(el);
     return true;
+  }
+
+  /** 滚动定位（部分环境 / 老旧内核没有 scrollIntoView，失败不报错） */
+  function safeScrollIntoView(el) {
+    try {
+      el.scrollIntoView({ behavior: "smooth", block: "center" });
+    } catch (e) { /* 静默 */ }
+  }
+
+  /* -------- 编辑态：进入 / 退出 -------- */
+
+  function setEditing(on) {
+    if (editing === on) {
+      return;
+    }
+    editing = on;
+    disarmDelete();
+
+    if (on) {
+      playSound("tick");
+      renderAll();
+      announce("编辑模式已开启：可修改时间段、内容，或添加删除时段");
+      return;
+    }
+
+    /* 退出编辑：补齐空标题 → 按时间排序 → 保存 */
+    var fixed = 0;
+    state.schedule.forEach(function (item) {
+      if (!item.title || !item.title.trim()) {
+        item.title = "未命名时段";
+        fixed++;
+      } else {
+        item.title = item.title.trim();
+      }
+    });
+    sortSchedule();
+    persist();
+    playSound("tick");
+    renderAll();
+    announce(fixed ? "已保存，空白标题已补为「未命名时段」" : "已保存，按时段顺序排好了");
+  }
+
+  /* -------- 编辑态：增删 / 恢复默认 / 防误删 -------- */
+
+  /** 写盘节流：输入框连续输入时不必每次落盘 */
+  function schedulePersist() {
+    clearTimeout(persistTimer);
+    persistTimer = setTimeout(function () {
+      persist();
+    }, 300);
+  }
+
+  function addItem() {
+    if (!editing) {
+      return;
+    }
+    var last = state.schedule[state.schedule.length - 1];
+    var start = last ? last.end : "07:00";
+    var end = addMinutes(start, 60);
+    var item = {
+      id: newId(),
+      start: start,
+      end: end,
+      title: "",
+      details: "",
+      category: "学习",
+      badges: []
+    };
+    state.schedule.push(item);
+    persist();
+    focusAfterRender = item.id;
+    pendingScrollId = item.id;
+    renderAll();
+    announce("已添加时段 " + start + " — " + end + "，可直接填写内容");
+  }
+
+  function removeItem(id) {
+    var idx = -1;
+    state.schedule.forEach(function (it, i) {
+      if (it.id === id) {
+        idx = i;
+      }
+    });
+    if (idx < 0) {
+      return;
+    }
+    var removed = state.schedule.splice(idx, 1)[0];
+    delete state.completed.daily[id];
+    persist();
+    renderAll();
+    announce("已删除「" + (removed.title || "未命名时段") + "」");
+  }
+
+  function handleDelete(btn, id) {
+    if (armedDelete.btn === btn) {
+      disarmDelete();
+      playSound("tick");
+      removeItem(id);
+      return;
+    }
+    disarmDelete();
+    armedDelete.btn = btn;
+    armedDelete.id = id;
+    btn.classList.add("is-armed");
+    playSound("tick");
+    announce("再点一次即可删除该时段");
+    armedDelete.timer = setTimeout(disarmDelete, 3500);
+  }
+
+  function disarmDelete() {
+    if (armedDelete.timer) {
+      clearTimeout(armedDelete.timer);
+    }
+    if (armedDelete.btn) {
+      armedDelete.btn.classList.remove("is-armed");
+    }
+    armedDelete = { btn: null, id: null, timer: null };
+  }
+
+  function armRestore() {
+    els.restoreBtn.classList.add("is-armed");
+    els.restoreBtn.dataset.arm = "1";
+    els.restoreBtn.textContent = "确认恢复?";
+    announce("再点一次将把今日安排恢复为默认 35 个时段");
+    clearTimeout(restoreTimer);
+    restoreTimer = setTimeout(disarmRestore, 3500);
+  }
+
+  function disarmRestore() {
+    clearTimeout(restoreTimer);
+    restoreTimer = null;
+    els.restoreBtn.classList.remove("is-armed");
+    els.restoreBtn.dataset.arm = "";
+    els.restoreBtn.textContent = "恢复默认";
+  }
+
+  function restoreDefault() {
+    state.schedule = buildDefaultSchedule();
+    persist();
+    disarmRestore();
+    renderAll();
+    announce("已恢复默认计划");
   }
 
   function armReset() {
@@ -903,12 +1486,28 @@
         playSound("tick");
         var mode = btn.dataset.mode;
         if (mode !== state.mode) {
+          if (editing) {
+            setEditing(false); // 切视图前先落盘排序
+          }
           state.mode = mode;
           persist();
           renderAll();
           announce("已切换到" + MODE_LABELS[mode]);
         }
       });
+    });
+
+    els.editBtn.addEventListener("click", function () {
+      setEditing(!editing);
+    });
+
+    els.restoreBtn.addEventListener("click", function () {
+      playSound("tick");
+      if (els.restoreBtn.dataset.arm === "1") {
+        restoreDefault();
+      } else {
+        armRestore();
+      }
     });
 
     els.resetBtn.addEventListener("click", function () {
@@ -922,30 +1521,35 @@
 
     els.fab.addEventListener("click", function () {
       playSound("tick");
-      if (state.mode !== "daily") {
+      if (state.mode !== "daily" || editing) {
         return;
       }
-      var tasks = dailyTasks();
-      var nowMin = timeToMin(formatHM(getNow()));
-      var curIdx = currentIndex(tasks, nowMin);
-      if (curIdx > -1) {
-        scrollToTask(tasks[curIdx].id);
+      var cur = findCurrent(dailyTasks(), timeToMin(formatHM(getNow())));
+      if (cur) {
+        scrollToTask(cur.id);
       }
     });
 
     els.nowCard.addEventListener("click", function (e) {
-      if (state.mode !== "daily" || e.target.closest("button, a")) {
+      if (state.mode !== "daily" || editing || e.target.closest("button, a")) {
         return;
       }
       scrollToTask(els.nowCard.dataset.scrollId);
     });
     els.nowCard.addEventListener("keydown", function (e) {
-      if (state.mode !== "daily") {
+      if (state.mode !== "daily" || editing) {
         return;
       }
       if (e.key === "Enter" || e.key === " " || e.key === "Spacebar") {
         e.preventDefault();
         scrollToTask(els.nowCard.dataset.scrollId);
+      }
+    });
+
+    /* Esc 退出编辑 */
+    document.addEventListener("keydown", function (e) {
+      if (editing && e.key === "Escape") {
+        setEditing(false);
       }
     });
 
@@ -964,6 +1568,10 @@
       appDate: document.getElementById("app-date"),
       appClock: document.getElementById("app-clock"),
       modeButtons: Array.prototype.slice.call(document.querySelectorAll(".mode-btn")),
+      editBtn: document.getElementById("edit-btn"),
+      editLabel: document.getElementById("edit-btn-label"),
+      editBar: document.getElementById("edit-bar"),
+      restoreBtn: document.getElementById("restore-btn"),
       resetBtn: document.getElementById("reset-btn"),
       resetLabel: document.getElementById("reset-btn-label"),
       progressText: document.getElementById("progress-text"),
@@ -986,13 +1594,20 @@
     renderAll();
     window.setInterval(tick, 15000);
 
-    /* 便于调试与自动化测试（只读工具，不暴露状态） */
+    /* 便于调试与自动化测试（只读工具，不暴露可变状态） */
     window.SCHEDULE_APP = {
       version: STORAGE_VERSION,
       storageKey: STORAGE_KEY,
       localDateKey: localDateKey,
       timeToMin: timeToMin,
+      durText: durText,
       mode: function () { return state.mode; },
+      isEditing: function () { return editing; },
+      schedule: function () {
+        return state.schedule.map(function (it) {
+          return { id: it.id, start: it.start, end: it.end, title: it.title };
+        });
+      },
       menuTotal: MENU_TOTAL
     };
   }
