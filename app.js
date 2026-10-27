@@ -1,24 +1,30 @@
 /* =========================================================
- * 一日计划 · 考研时间表 + 每周菜单打卡
+ * 一日计划 · 考研时间表 + 每周菜单打卡 + 饮水目标
  * 纯原生 JS，无依赖。状态持久化：localStorage
- * key: kaoyan-daily-schedule-v1（schema version 3）
+ * key: kaoyan-daily-schedule-v1（schema version 4）
  *
- * 双视图（Tab）：
+ * 三视图（Tab）：
  *   daily —— 每日计划：默认 35 个「时间段」（t- 前缀），可自定义增删改
- *   menu  —— 每周菜单：7 天 × 4 餐 = 28 餐次（训练日/休息日加餐共享一个勾选位）
+ *   menu  —— 每周菜单：7 天 × 4 餐 = 28 餐次（训练日/休息日加餐共享一个勾选位），可编辑文本
+ *   water —— 喝大水：按身高/体重/年龄算每日目标，拆成 100ml 一杯，点一杯记一杯
  *
- * 编辑态（v3 新增）：
- *   默认只读，点右上角「编辑」才进入编辑态；编辑态下每张卡变成
- *   时间段表单（开始时间 / 结束时间 / 做什么 / 备注 / 分类 / 删除），
- *   列表底部有「＋ 添加时间段」。点「完成」后自动按开始时间排序并保存。
+ * 编辑态：
+ *   默认只读，点右上角「编辑」才进入编辑态，按钮变「完成」。
+ *   daily：每张卡变成时间段表单（开始 / 结束 / 做什么 / 备注 / 分类 / 删除）+「添加时间段」
+ *   menu ：每餐文本变成可在原地编辑的输入框，饮水目标也可改
+ *   water：身高 / 体重 / 年龄 / 训练日 可改，改完立刻重算目标
  *   编辑态不持久化：重新打开页面永远是只读视图。
  *
- * 数据模型：每个时段 { id, start:"HH:MM", end:"HH:MM", title, details, category, badges }
+ * 数据模型
+ *   时段 { id, start:"HH:MM", end:"HH:MM", title, details, category, badges }
+ *   菜单 { day, breakfast, lunch, snackTraining, snackRest, dinner, waterTraining, waterRest, badges }
+ *   饮水 { height, weight, age, training, done(已喝杯数) }
  *   当前高亮 = start <= now < end；end <= now 视为已过。
  *
  * 旧数据迁移（全部容错，不丢打卡）
  *   v1 mode training/rest → daily/menu，completed.training → completed.daily
- *   v2 无 schedule 字段 → 由默认 TRAINING 推导 start/end
+ *   v2 无 schedule / menu / water → 用默认值补齐
+ *   v3 无 menu / water → 用默认值补齐
  * ========================================================= */
 (function () {
   "use strict";
@@ -26,9 +32,9 @@
   /* ---------------- 常量 ---------------- */
 
   var STORAGE_KEY = "kaoyan-daily-schedule-v1";
-  var STORAGE_VERSION = 3;
-  var MODES = ["daily", "menu"];
-  var MODE_LABELS = { daily: "每日计划", menu: "每周菜单" };
+  var STORAGE_VERSION = 4;
+  var MODES = ["daily", "menu", "water"];
+  var MODE_LABELS = { daily: "每日计划", menu: "每周菜单", water: "喝大水" };
 
   /** 可选的分类（与 styles.css 的 .cat[data-cat] 一一对应） */
   var CATEGORIES = ["学习", "饮食", "饮水", "训练", "休息", "健康", "睡眠"];
@@ -95,6 +101,44 @@
   /** 菜单 key：mon/tue/... + breakfast/lunch/snackTraining/snackRest/dinner */
   var MENU_DAY_CODES = ["mon", "tue", "wed", "thu", "fri", "sat", "sun"];
   var MENU_TOTAL = 28; // 7 天 × 4 餐（加餐共享 1 个勾选位）
+
+  /** 菜单中可编辑的餐次字段（顺序即编辑态的渲染顺序） */
+  var MENU_MEAL_FIELDS = [
+    ["breakfast", "早餐"],
+    ["lunch", "午餐"],
+    ["dinner", "晚餐"],
+    ["snackTraining", "加餐 · 训练日"],
+    ["snackRest", "加餐 · 休息日"]
+  ];
+
+  /* ---------------- 饮水目标参数 ---------------- */
+
+  /** 每公斤体重建议饮水量（ml），按年龄分档：越年轻代谢越高 */
+  var AGE_FACTORS = [
+    { maxAge: 29, factor: 40, band: "29岁及以下" },
+    { maxAge: 54, factor: 35, band: "30–54岁" },
+    { maxAge: 64, factor: 30, band: "55–64岁" },
+    { maxAge: 200, factor: 25, band: "65岁及以上" }
+  ];
+
+  /** 每日目标上下限（ml），并按 100ml 取整 */
+  var WATER_MIN = 1500;
+  var WATER_MAX = 3500;
+  var WATER_STEP = 100;   // 一杯 = 100ml
+  var WATER_TRAINING_EXTRA = 500; // 训练日额外补充
+
+  /** 身高体重年龄的合法范围（超出范围时输入会被夹到边界） */
+  var WATER_RANGE = {
+    height: { min: 120, max: 230, fallback: 170 },
+    weight: { min: 25, max: 200, fallback: 65 },
+    age: { min: 10, max: 100, fallback: 25 }
+  };
+
+  var WATER_FIELDS = [
+    ["height", "身高", "cm", 170],
+    ["weight", "体重", "kg", 65],
+    ["age", "年龄", "岁", 25]
+  ];
 
   /* ---------------- 日期 / 时间工具 ---------------- */
 
@@ -284,6 +328,132 @@
     });
   }
 
+  /* ---------------- 菜单数据：默认值 / 校验 ---------------- */
+
+  /** 默认菜单（深拷贝，避免编辑时改到常量） */
+  function buildDefaultMenu() {
+    return WEEKLY_MENU.map(function (item) {
+      return {
+        day: item.day,
+        breakfast: item.breakfast,
+        lunch: item.lunch,
+        snackTraining: item.snackTraining,
+        snackRest: item.snackRest,
+        dinner: item.dinner,
+        waterTraining: item.waterTraining,
+        waterRest: item.waterRest,
+        badges: item.badges.slice()
+      };
+    });
+  }
+
+  /** 用默认菜单逐字段兜底：缺字段补默认，多余字段丢弃；长度固定 7 天 */
+  function sanitizeMenu(raw) {
+    if (!Array.isArray(raw) || raw.length !== WEEKLY_MENU.length) {
+      return null;
+    }
+    return WEEKLY_MENU.map(function (def, i) {
+      var src = raw[i] && typeof raw[i] === "object" ? raw[i] : {};
+      var out = { day: def.day, badges: def.badges.slice() };
+      ["breakfast", "lunch", "snackTraining", "snackRest", "dinner", "waterTraining", "waterRest"].forEach(function (f) {
+        out[f] = typeof src[f] === "string" ? src[f] : def[f];
+      });
+      return out;
+    });
+  }
+
+  /* ---------------- 饮水：数据校验与目标计算 ---------------- */
+
+  function clampNumber(v, min, max, fallback) {
+    var n = typeof v === "number" ? v : parseFloat(v);
+    if (!isFinite(n)) {
+      return fallback;
+    }
+    return Math.min(max, Math.max(min, Math.round(n)));
+  }
+
+  function defaultWater() {
+    return { height: 170, weight: 65, age: 25, training: false, done: 0 };
+  }
+
+  function sanitizeWater(raw) {
+    var out = defaultWater();
+    if (!raw || typeof raw !== "object") {
+      return out;
+    }
+    out.height = clampNumber(raw.height, WATER_RANGE.height.min, WATER_RANGE.height.max, WATER_RANGE.height.fallback);
+    out.weight = clampNumber(raw.weight, WATER_RANGE.weight.min, WATER_RANGE.weight.max, WATER_RANGE.weight.fallback);
+    out.age = clampNumber(raw.age, WATER_RANGE.age.min, WATER_RANGE.age.max, WATER_RANGE.age.fallback);
+    out.training = !!raw.training;
+    out.done = clampNumber(raw.done, 0, 999, 0);
+    return out;
+  }
+
+  /**
+   * 计算每日饮水目标：
+   *   1) 标准体重 = 身高(cm) - 105
+   *   2) 实际体重超过标准体重 1.2 倍时，按标准体重算（避免超重者目标虚高）
+   *   3) 体重 × 年龄系数（≤29 岁 40 / 30–54 岁 35 / 55–64 岁 30 / ≥65 岁 25 ml/kg）
+   *   4) 训练日 +500ml
+   *   5) 夹到 1500–3500ml，按 100ml 取整（即杯数）
+   */
+  function waterPlan(w) {
+    var band = AGE_FACTORS[AGE_FACTORS.length - 1];
+    for (var i = 0; i < AGE_FACTORS.length; i++) {
+      if (w.age <= AGE_FACTORS[i].maxAge) {
+        band = AGE_FACTORS[i];
+        break;
+      }
+    }
+
+    var stdWeight = w.height - 105;
+    var useWeight = w.weight;
+    var overWeight = false;
+    if (stdWeight > 0 && w.weight > stdWeight * 1.2) {
+      useWeight = stdWeight;
+      overWeight = true;
+    }
+
+    var base = Math.round(useWeight * band.factor);
+    var extra = w.training ? WATER_TRAINING_EXTRA : 0;
+    var raw = base + extra;
+    var total = Math.min(WATER_MAX, Math.max(WATER_MIN, raw));
+    total = Math.round(total / WATER_STEP) * WATER_STEP;
+
+    return {
+      factor: band.factor,
+      band: band.band,
+      stdWeight: stdWeight,
+      useWeight: useWeight,
+      overWeight: overWeight,
+      base: base,
+      extra: extra,
+      raw: raw,
+      clamped: total !== raw,
+      total: total,
+      cups: total / WATER_STEP
+    };
+  }
+
+  /** 计算依据说明文案 */
+  function waterExplain(w, plan) {
+    var text = (plan.overWeight ? "按标准体重 " : "体重 ") + plan.useWeight + "kg × " +
+      plan.factor + "ml/kg（" + plan.band + "）= " + plan.base + "ml";
+    if (plan.extra) {
+      text += " + 训练日 500ml";
+    }
+    text += " → 目标 " + plan.total + "ml";
+    if (plan.clamped) {
+      text += "（已夹到 " + WATER_MIN + "–" + WATER_MAX + "ml 区间）";
+    }
+    if (plan.overWeight) {
+      text += "；标准体重按身高 −105 计（" + plan.stdWeight + "kg），超重时用它算，避免目标虚高。";
+    } else {
+      text += "。";
+    }
+    return text;
+  }
+
   /* ---------------- 状态 ---------------- */
 
   function defaultState() {
@@ -292,7 +462,9 @@
       date: localDateKey(),
       mode: "daily",
       completed: { daily: {}, menu: {} },
-      schedule: buildDefaultSchedule()
+      schedule: buildDefaultSchedule(),
+      menu: buildDefaultMenu(),
+      water: defaultWater()
     };
   }
 
@@ -302,7 +474,7 @@
   function normalizeMode(m) {
     if (m === "training") return "daily";
     if (m === "rest") return "menu";
-    if (m === "daily" || m === "menu") return m;
+    if (MODES.indexOf(m) > -1) return m;
     return "daily";
   }
 
@@ -345,7 +517,7 @@
     var today = localDateKey();
     if (parsed && typeof parsed === "object") {
       state.mode = normalizeMode(parsed.mode);
-      // 日期不是今天：两个视图的完成状态全部清空，mode 与自定义时段保留
+      // 日期不是今天：两个视图的完成状态全部清空，mode 与自定义内容保留
       if (parsed.date === today) {
         state.completed = normalizeCompleted(parsed.completed);
       }
@@ -353,6 +525,16 @@
       var schedule = sanitizeSchedule(parsed.schedule);
       if (schedule) {
         state.schedule = schedule;
+      }
+      // 自定义菜单：缺失或长度不对时整体回退默认
+      var menu = sanitizeMenu(parsed.menu);
+      if (menu) {
+        state.menu = menu;
+      }
+      // 饮水资料：缺字段按默认值兜底；跨日时已喝杯数清零
+      state.water = sanitizeWater(parsed.water);
+      if (parsed.date !== today) {
+        state.water.done = 0;
       }
     }
     return state;
@@ -650,11 +832,11 @@
       var field = e.target.dataset ? e.target.dataset.field : null;
       if (field === "title") {
         item.title = e.target.value;
-        schedulePersist();
+        softPersist();
       } else if (field === "details") {
         item.details = e.target.value;
         autoGrow(e.target);
-        schedulePersist();
+        softPersist();
       }
     });
 
@@ -665,7 +847,7 @@
         commitTime(item, field, e.target.value, startInput, endInput, durEl);
       } else if (field === "category") {
         item.category = e.target.value;
-        schedulePersist();
+        softPersist();
       }
     });
 
@@ -695,7 +877,7 @@
     startInput.value = item.start;
     endInput.value = item.end;
     durEl.textContent = durText(item.start, item.end);
-    schedulePersist();
+    softPersist();
     announce("已改为 " + item.start + " — " + item.end);
   }
 
@@ -980,14 +1162,97 @@
     return card;
   }
 
+  /** 编辑态的菜单卡：餐次文本原地变成输入框 */
+  function makeMenuEditCard(menuItem, code) {
+    var idx = MENU_DAY_CODES.indexOf(code);
+
+    var card = document.createElement("article");
+    card.className = "menu-card is-editing";
+
+    var head = document.createElement("header");
+    head.className = "menu-card-head";
+    var day = document.createElement("h3");
+    day.className = "menu-day";
+    day.textContent = menuItem.day;
+    head.appendChild(day);
+    var badges = document.createElement("div");
+    badges.className = "menu-badges";
+    menuItem.badges.forEach(function (b) {
+      badges.appendChild(makeBadge(b));
+    });
+    head.appendChild(badges);
+    card.appendChild(head);
+
+    var rows = document.createElement("div");
+    rows.className = "menu-edit-rows";
+
+    MENU_MEAL_FIELDS.forEach(function (pair) {
+      var field = pair[0];
+      var row = document.createElement("div");
+      row.className = "menu-edit-row";
+      var lab = document.createElement("span");
+      lab.className = "menu-edit-label";
+      lab.textContent = pair[1];
+      row.appendChild(lab);
+
+      var ta = document.createElement("textarea");
+      ta.className = "edit-field menu-edit-text";
+      ta.rows = 2;
+      ta.value = menuItem[field] || "";
+      ta.placeholder = pair[1] + "吃/喝什么";
+      ta.dataset.meal = field;
+      row.appendChild(ta);
+      rows.appendChild(row);
+    });
+
+    var waterRow = document.createElement("div");
+    waterRow.className = "menu-edit-water";
+    [["waterTraining", "训练日饮水"], ["waterRest", "休息日饮水"]].forEach(function (pair) {
+      var box = document.createElement("label");
+      box.className = "menu-edit-water-box";
+      var lab = document.createElement("span");
+      lab.className = "menu-edit-water-label";
+      lab.textContent = pair[1];
+      box.appendChild(lab);
+      var input = document.createElement("input");
+      input.type = "text";
+      input.className = "edit-field menu-edit-water-input";
+      input.value = menuItem[pair[0]] || "";
+      input.placeholder = "如 约2600ml";
+      input.setAttribute("autocomplete", "off");
+      input.dataset.meal = pair[0];
+      box.appendChild(input);
+      waterRow.appendChild(box);
+    });
+
+    card.appendChild(rows);
+    card.appendChild(waterRow);
+
+    card.addEventListener("input", function (e) {
+      var meal = e.target.dataset ? e.target.dataset.meal : null;
+      if (!meal) {
+        return;
+      }
+      state.menu[idx][meal] = e.target.value;
+      if (e.target.tagName === "TEXTAREA") {
+        autoGrow(e.target);
+      }
+      softPersist();
+    });
+
+    return card;
+  }
+
   function renderMenu() {
     var listEl = els.taskList;
     listEl.textContent = "";
     var frag = document.createDocumentFragment();
-    WEEKLY_MENU.forEach(function (item, i) {
-      frag.appendChild(makeMenuCard(item, MENU_DAY_CODES[i]));
+    state.menu.forEach(function (item, i) {
+      var code = MENU_DAY_CODES[i];
+      frag.appendChild(editing ? makeMenuEditCard(item, code) : makeMenuCard(item, code));
     });
     listEl.appendChild(frag);
+    growTextareas(listEl);
   }
 
   function renderMenuStates() {
@@ -1001,26 +1266,261 @@
     });
   }
 
+  /* ---------------- 渲染：喝大水 ---------------- */
+
+  var DROP_SVG = '<svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M12 3.2c3.4 4 5.8 6.9 5.8 9.6a5.8 5.8 0 1 1-11.6 0c0-2.7 2.4-5.6 5.8-9.6z" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/></svg>';
+
+  function currentWaterDone(plan) {
+    return Math.max(0, Math.min(plan.cups, state.water.done | 0));
+  }
+
+  function makeCup(i, done) {
+    var isDone = i < done;
+    var btn = document.createElement("button");
+    btn.type = "button";
+    btn.className = "cup" + (isDone ? " done" : "") + (i === done ? " next" : "");
+    btn.dataset.cup = String(i);
+    btn.setAttribute("aria-pressed", isDone ? "true" : "false");
+    btn.setAttribute("aria-label", "第 " + (i + 1) + " 杯 100 毫升" + (isDone ? "，已完成" : "，未完成"));
+    btn.innerHTML = DROP_SVG + '<span class="cup-num">' + (i + 1) + "</span>";
+    btn.addEventListener("click", function () {
+      /* 点第 N 杯 = 喝到第 N 杯（前缀式记录）；点已完成的杯则回退 */
+      setWaterDone(i + 1 > done ? i + 1 : i);
+    });
+    return btn;
+  }
+
+  function setWaterDone(n) {
+    var plan = waterPlan(state.water);
+    var next = Math.max(0, Math.min(plan.cups, n));
+    if (next === state.water.done) {
+      return;
+    }
+    var up = next > state.water.done;
+    state.water.done = next;
+    persist();
+    playSound(up && next > 0 ? "complete" : "uncomplete");
+    renderAll();
+    if (next >= plan.cups) {
+      announce("今日饮水目标已完成，共 " + plan.total + " 毫升");
+    } else {
+      announce("已喝 " + next * WATER_STEP + " 毫升，还差 " + (plan.total - next * WATER_STEP) + " 毫升");
+    }
+  }
+
+  /** 编辑态：身高 / 体重 / 年龄 / 训练日 */
+  function makeWaterProfile() {
+    var wrap = document.createElement("div");
+    wrap.className = "water-profile";
+
+    var grid = document.createElement("div");
+    grid.className = "water-fields";
+
+    WATER_FIELDS.forEach(function (item) {
+      var field = item[0];
+      var range = WATER_RANGE[field];
+
+      var box = document.createElement("label");
+      box.className = "water-field";
+
+      var lab = document.createElement("span");
+      lab.className = "water-field-label";
+      lab.textContent = item[1];
+      box.appendChild(lab);
+
+      var inner = document.createElement("div");
+      inner.className = "water-field-input";
+
+      var input = document.createElement("input");
+      input.type = "number";
+      input.inputMode = "numeric";
+      input.className = "edit-field water-num";
+      input.value = String(state.water[field]);
+      input.min = String(range.min);
+      input.max = String(range.max);
+      input.dataset.water = field;
+      input.setAttribute("aria-label", item[1] + "，单位" + item[2]);
+      inner.appendChild(input);
+
+      var unit = document.createElement("span");
+      unit.className = "water-field-unit";
+      unit.textContent = item[2];
+      inner.appendChild(unit);
+
+      box.appendChild(inner);
+      grid.appendChild(box);
+    });
+
+    wrap.appendChild(grid);
+
+    var toggle = document.createElement("button");
+    toggle.type = "button";
+    toggle.className = "water-toggle" + (state.water.training ? " is-on" : "");
+    toggle.setAttribute("aria-pressed", state.water.training ? "true" : "false");
+    toggle.textContent = state.water.training ? "训练日 · 已额外 +500ml" : "训练日额外 +500ml";
+    toggle.addEventListener("click", function () {
+      state.water.training = !state.water.training;
+      persist();
+      playSound("tick");
+      renderAll();
+      announce(state.water.training ? "已按训练日计算，目标增加 500 毫升" : "已按休息日计算");
+    });
+    wrap.appendChild(toggle);
+
+    var note = document.createElement("p");
+    note.className = "water-profile-note";
+    note.textContent = "改完自动重算。范围：身高 120–230cm、体重 25–200kg、年龄 10–100 岁，超出会夹到边界。";
+    wrap.appendChild(note);
+
+    /* 失焦或回车才提交，避免边输边重算导致输入框重建 */
+    wrap.addEventListener("change", function (e) {
+      var field = e.target.dataset ? e.target.dataset.water : null;
+      if (!field) {
+        return;
+      }
+      var range = WATER_RANGE[field];
+      var v = clampNumber(e.target.value, range.min, range.max, state.water[field]);
+      state.water[field] = v;
+      e.target.value = String(v);
+
+      var plan = waterPlan(state.water);
+      if (state.water.done > plan.cups) {
+        state.water.done = plan.cups;
+      }
+      persist();
+      renderAll();
+      announce("目标已更新为 " + plan.total + " 毫升，共 " + plan.cups + " 杯");
+    });
+
+    return wrap;
+  }
+
+  function renderWater() {
+    var listEl = els.taskList;
+    listEl.textContent = "";
+
+    var w = state.water;
+    var plan = waterPlan(w);
+    var done = currentWaterDone(plan);
+    var doneMl = done * WATER_STEP;
+
+    var panel = document.createElement("section");
+    panel.className = "water-panel";
+    panel.setAttribute("aria-label", "每日饮水");
+
+    if (editing) {
+      panel.appendChild(makeWaterProfile());
+    }
+
+    /* 目标 / 已喝 */
+    var head = document.createElement("div");
+    head.className = "water-head";
+
+    var goal = document.createElement("div");
+    goal.className = "water-goal";
+    var total = document.createElement("p");
+    total.className = "water-total";
+    var num = document.createElement("span");
+    num.className = "water-total-num";
+    num.textContent = String(plan.total);
+    var unit = document.createElement("span");
+    unit.className = "water-total-unit";
+    unit.textContent = "ml";
+    total.appendChild(num);
+    total.appendChild(unit);
+    goal.appendChild(total);
+    var sub = document.createElement("p");
+    sub.className = "water-sub";
+    sub.textContent = "今日目标 · " + plan.cups + " 杯 × 100ml";
+    goal.appendChild(sub);
+    head.appendChild(goal);
+
+    var stat = document.createElement("div");
+    stat.className = "water-stat";
+    var statMain = document.createElement("span");
+    statMain.className = "water-stat-main";
+    statMain.textContent = doneMl + " / " + plan.total;
+    var statUnit = document.createElement("span");
+    statUnit.className = "water-stat-unit";
+    statUnit.textContent = "ml";
+    stat.appendChild(statMain);
+    stat.appendChild(statUnit);
+    head.appendChild(stat);
+    panel.appendChild(head);
+
+    /* 进度条 */
+    var track = document.createElement("div");
+    track.className = "water-track";
+    track.setAttribute("role", "progressbar");
+    track.setAttribute("aria-label", "今日饮水进度");
+    track.setAttribute("aria-valuemin", "0");
+    track.setAttribute("aria-valuemax", String(plan.total));
+    track.setAttribute("aria-valuenow", String(doneMl));
+    var fill = document.createElement("div");
+    fill.className = "water-fill";
+    fill.style.width = (plan.cups ? (done / plan.cups) * 100 : 0) + "%";
+    track.appendChild(fill);
+    panel.appendChild(track);
+
+    var left = document.createElement("p");
+    left.className = "water-left" + (done >= plan.cups ? " is-full" : "");
+    left.textContent = done >= plan.cups
+      ? "今日饮水目标已完成，继续保持小口慢饮。"
+      : "还差 " + (plan.total - doneMl) + " ml（约 " + (plan.cups - done) + " 杯），小口分次喝";
+    panel.appendChild(left);
+
+    /* 100ml 一杯 */
+    var grid = document.createElement("div");
+    grid.className = "cup-grid";
+    grid.setAttribute("role", "group");
+    grid.setAttribute("aria-label", "每杯 100 毫升，点一杯记一杯");
+    for (var i = 0; i < plan.cups; i++) {
+      grid.appendChild(makeCup(i, done));
+    }
+    panel.appendChild(grid);
+
+    var hint = document.createElement("p");
+    hint.className = "cup-hint";
+    hint.textContent = "点第 N 杯表示已喝到第 N 杯；再点同一杯可回退。";
+    panel.appendChild(hint);
+
+    var explain = document.createElement("p");
+    explain.className = "water-explain";
+    explain.textContent = waterExplain(w, plan);
+    panel.appendChild(explain);
+
+    listEl.appendChild(panel);
+  }
+
   /* ---------------- 渲染：进度 / 预告 / FAB / 编辑态 ---------------- */
 
   function renderProgress() {
     var total;
     var done;
+    var text;
     if (state.mode === "daily") {
       var tasks = dailyTasks();
       total = tasks.length;
       done = tasks.filter(function (t) {
         return !!state.completed.daily[t.id];
       }).length;
+      text = done + "/" + total;
       els.progressTrack.setAttribute("aria-label", "每日计划完成进度");
-    } else {
+    } else if (state.mode === "menu") {
       total = MENU_TOTAL;
       done = menuEatenCount();
+      text = done + "/" + total;
       els.progressTrack.setAttribute("aria-label", "每周菜单进度（已吃餐次）");
+    } else {
+      var plan = waterPlan(state.water);
+      total = plan.cups;
+      done = currentWaterDone(plan);
+      text = done * WATER_STEP + "/" + plan.total + "ml";
+      els.progressTrack.setAttribute("aria-label", "今日饮水进度（毫升）");
     }
     var pct = total ? Math.round((done / total) * 100) : 0;
 
-    els.progressText.textContent = done + "/" + total;
+    els.progressText.textContent = text;
     els.progressPct.textContent = pct + "%";
     els.progressFill.style.width = pct + "%";
     els.progressTrack.setAttribute("aria-valuenow", String(pct));
@@ -1111,17 +1611,23 @@
     lastRenderedHM = els.appClock.textContent;
   }
 
+  /** 各视图进入编辑态时的提示文案 */
+  var EDIT_TIPS = {
+    daily: "可改时间段与内容",
+    menu: "可直接修改每周菜单内容",
+    water: "可改身高体重年龄"
+  };
+
   /** 编辑按钮 / 编辑栏 的显隐与文案 */
   function renderEditUi() {
-    var editable = state.mode === "daily";
-    if (!editable && editing) {
-      editing = false; // 切到菜单视图时自动退出编辑态
-    }
-    els.editBtn.hidden = !editable;
+    els.editBtn.hidden = false;
     els.editBtn.setAttribute("aria-pressed", editing ? "true" : "false");
     els.editLabel.textContent = editing ? "完成" : "编辑";
-    els.editBar.hidden = !(editable && editing);
-    document.body.classList.toggle("is-editing", editable && editing);
+    els.editBar.hidden = !editing;
+    if (els.editBarText) {
+      els.editBarText.textContent = editing ? "编辑模式 · " + EDIT_TIPS[state.mode] : "";
+    }
+    document.body.classList.toggle("is-editing", editing);
   }
 
   function renderAll() {
@@ -1134,11 +1640,15 @@
       els.listHeading.textContent = editing ? "编辑今日安排" : "今日安排";
       renderList();
       renderStates();
-    } else {
+    } else if (state.mode === "menu") {
       els.nowCard.hidden = true;
-      els.listHeading.textContent = "本周菜单 · 28 餐次";
+      els.listHeading.textContent = editing ? "编辑本周菜单" : "本周菜单 · 28 餐次";
       renderMenu();
       renderMenuStates();
+    } else {
+      els.nowCard.hidden = true;
+      els.listHeading.textContent = editing ? "饮水资料 · 今日目标" : "今日饮水";
+      renderWater();
     }
     renderProgress();
     renderNow();
@@ -1156,14 +1666,10 @@
     if (today !== state.date) {
       state.date = today;
       state.completed = { daily: {}, menu: {} };
+      state.water.done = 0;
       persist();
-      renderDate();
-      renderStates();
-      renderMenuStates();
-      renderProgress();
-      renderNow();
-      renderFab();
-      announce("新的一天，今日打卡已自动重置");
+      renderAll();
+      announce("新的一天，今日打卡与饮水记录已自动重置");
       return true;
     }
     return false;
@@ -1245,13 +1751,29 @@
       window.ScheduleHaptics.attach(els.editBtn);
       window.ScheduleHaptics.attach(els.restoreBtn);
       window.ScheduleHaptics.attach(els.fab);
+
+      if (state.mode === "water") {
+        /* 饮水视图：杯子逐杯挂震动（编辑态的资料输入框不挂，避免遮挡） */
+        els.taskList.querySelectorAll(".cup").forEach(function (c) {
+          window.ScheduleHaptics.attach(c);
+        });
+        var toggle = els.taskList.querySelector(".water-toggle");
+        if (toggle) {
+          window.ScheduleHaptics.attach(toggle);
+        }
+        return;
+      }
+
       if (editing) {
         /* 编辑态卡片里是输入控件，不挂震动层（透明 label 会挡住点击） */
         var addBtn = els.taskList.querySelector(".add-btn");
         if (addBtn) {
           window.ScheduleHaptics.attach(addBtn);
         }
-      } else if (state.mode === "daily") {
+        return;
+      }
+
+      if (state.mode === "daily") {
         els.taskList.querySelectorAll(".task-card").forEach(function (c) {
           window.ScheduleHaptics.attach(c);
         });
@@ -1325,27 +1847,35 @@
       return;
     }
 
-    /* 退出编辑：补齐空标题 → 按时间排序 → 保存 */
-    var fixed = 0;
-    state.schedule.forEach(function (item) {
-      if (!item.title || !item.title.trim()) {
-        item.title = "未命名时段";
-        fixed++;
-      } else {
-        item.title = item.title.trim();
-      }
-    });
-    sortSchedule();
+    /* 退出编辑：daily 补齐空标题并按时间排序；其余视图只落盘 */
+    if (state.mode === "daily") {
+      var fixed = 0;
+      state.schedule.forEach(function (item) {
+        if (!item.title || !item.title.trim()) {
+          item.title = "未命名时段";
+          fixed++;
+        } else {
+          item.title = item.title.trim();
+        }
+      });
+      sortSchedule();
+      persist();
+      playSound("tick");
+      renderAll();
+      announce(fixed ? "已保存，空白标题已补为「未命名时段」" : "已保存，按时段顺序排好了");
+      return;
+    }
+
     persist();
     playSound("tick");
     renderAll();
-    announce(fixed ? "已保存，空白标题已补为「未命名时段」" : "已保存，按时段顺序排好了");
+    announce("已保存");
   }
 
   /* -------- 编辑态：增删 / 恢复默认 / 防误删 -------- */
 
   /** 写盘节流：输入框连续输入时不必每次落盘 */
-  function schedulePersist() {
+  function softPersist() {
     clearTimeout(persistTimer);
     persistTimer = setTimeout(function () {
       persist();
@@ -1437,11 +1967,24 @@
   }
 
   function restoreDefault() {
-    state.schedule = buildDefaultSchedule();
+    /* 按当前视图恢复默认：计划 / 菜单 / 饮水资料 */
+    var label;
+    if (state.mode === "daily") {
+      state.schedule = buildDefaultSchedule();
+      label = "今日安排";
+    } else if (state.mode === "menu") {
+      state.menu = buildDefaultMenu();
+      label = "每周菜单";
+    } else {
+      var keepDone = state.water.done;
+      state.water = defaultWater();
+      state.water.done = keepDone; // 恢复资料不清空今天的喝水记录
+      label = "饮水资料";
+    }
     persist();
     disarmRestore();
     renderAll();
-    announce("已恢复默认计划");
+    announce(label + "已恢复默认");
   }
 
   function armReset() {
@@ -1462,15 +2005,16 @@
   }
 
   function resetToday() {
-    /* 只清空当前视图，不影响另一个视图 */
-    state.completed[state.mode] = {};
+    /* 只清空当前视图，不影响另外两个视图 */
+    if (state.mode === "water") {
+      state.water.done = 0;
+    } else {
+      state.completed[state.mode] = {};
+    }
     persist();
     disarmReset();
-    renderStates();
-    renderMenuStates();
-    renderProgress();
-    renderNow();
-    announce(MODE_LABELS[state.mode] + "打卡已重置");
+    renderAll();
+    announce(MODE_LABELS[state.mode] + "今日记录已重置");
   }
 
   function announce(msg) {
@@ -1571,6 +2115,7 @@
       editBtn: document.getElementById("edit-btn"),
       editLabel: document.getElementById("edit-btn-label"),
       editBar: document.getElementById("edit-bar"),
+      editBarText: document.getElementById("edit-bar-text"),
       restoreBtn: document.getElementById("restore-btn"),
       resetBtn: document.getElementById("reset-btn"),
       resetLabel: document.getElementById("reset-btn-label"),
@@ -1607,6 +2152,23 @@
         return state.schedule.map(function (it) {
           return { id: it.id, start: it.start, end: it.end, title: it.title };
         });
+      },
+      menu: function () {
+        return state.menu.map(function (m) {
+          return {
+            day: m.day, breakfast: m.breakfast, lunch: m.lunch,
+            snackTraining: m.snackTraining, snackRest: m.snackRest, dinner: m.dinner,
+            waterTraining: m.waterTraining, waterRest: m.waterRest
+          };
+        });
+      },
+      water: function () {
+        var plan = waterPlan(state.water);
+        return {
+          height: state.water.height, weight: state.water.weight, age: state.water.age,
+          training: state.water.training, done: state.water.done,
+          total: plan.total, cups: plan.cups
+        };
       },
       menuTotal: MENU_TOTAL
     };
