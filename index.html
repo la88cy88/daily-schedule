@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <meta name="color-scheme" content="light dark">
   <meta name="format-detection" content="telephone=no">
-  <meta name="description" content="考研 + 力量训练一日时间表打卡：可自定义时间段与内容，点击任务卡完成打卡，自动高亮当前时间段，按日期自动重置，适配 iPhone Safari 与主屏幕 PWA。">
+  <meta name="description" content="考研 + 力量训练一日时间表打卡：每日计划可自定义时间段，每周菜单可编辑，按身高体重年龄自动计算饮水目标并按 100ml 打卡，适配 iPhone Safari 与主屏幕 PWA。">
 
   <title>一日计划</title>
 
@@ -51,6 +51,9 @@
         <button type="button" class="mode-btn" data-mode="menu" aria-pressed="false">
           <span class="mode-dot" aria-hidden="true"></span>每周菜单
         </button>
+        <button type="button" class="mode-btn" data-mode="water" aria-pressed="false">
+          <span class="mode-dot" aria-hidden="true"></span>喝大水
+        </button>
       </div>
 
       <div class="progress-block">
@@ -81,7 +84,7 @@
     </section>
 
     <div class="edit-bar" id="edit-bar" hidden>
-      <span class="edit-bar-text">编辑模式 · 可改时间段与内容</span>
+      <span class="edit-bar-text" id="edit-bar-text">编辑模式 · 可改时间段与内容</span>
       <button type="button" class="edit-bar-restore" id="restore-btn">恢复默认</button>
     </div>
 
