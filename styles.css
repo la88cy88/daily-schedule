@@ -258,7 +258,7 @@ svg {
 /* ---------- 模式切换 ---------- */
 .mode-toggle {
   display: grid;
-  grid-template-columns: repeat(3, 1fr);
+  grid-template-columns: repeat(4, 1fr);
   gap: 5px;
   margin-top: 10px;
   padding: 4px;
@@ -1449,5 +1449,515 @@ textarea.edit-field {
   *::after {
     animation: none !important;
     transition: none !important;
+  }
+}
+
+/* =========================================================
+   备孕 90 天计划视图
+   ========================================================= */
+
+.plan-hero {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  padding: 13px 14px;
+  border-radius: 14px;
+  border: 1px solid var(--line);
+  border-left: 3px solid var(--accent);
+  background: var(--card);
+  box-shadow: var(--shadow);
+}
+
+.plan-hero-top {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+}
+
+.plan-week {
+  font-size: 16px;
+  font-weight: 700;
+  color: var(--ink);
+  letter-spacing: 0.01em;
+}
+
+.plan-left {
+  margin-left: auto;
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--accent-strong);
+  background: var(--accent-soft);
+  padding: 2px 8px;
+  border-radius: 999px;
+}
+
+.plan-hero-sub {
+  font-size: 12.5px;
+  color: var(--faint);
+  font-variant-numeric: tabular-nums;
+}
+
+.plan-hero-warn {
+  margin-top: 2px;
+  font-size: 12.5px;
+  color: var(--orange);
+  background: var(--orange-soft);
+  padding: 5px 8px;
+  border-radius: 8px;
+}
+
+/* ---------- 星期切换 ---------- */
+
+.plan-days {
+  display: grid;
+  grid-template-columns: repeat(7, 1fr);
+  gap: 5px;
+}
+
+.plan-daytab {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 1px;
+  min-height: 46px;
+  padding: 4px 0;
+  border-radius: 10px;
+  border: 1px solid var(--line);
+  background: var(--card);
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 600;
+  transition: background 0.15s ease, border-color 0.15s ease, color 0.15s ease;
+}
+
+.plan-daytab-w {
+  line-height: 1.1;
+}
+
+.plan-daytab-d {
+  font-size: 10.5px;
+  font-weight: 500;
+  color: var(--faint);
+  font-variant-numeric: tabular-nums;
+}
+
+.plan-daytab.is-active {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #fff;
+}
+
+.plan-daytab.is-active .plan-daytab-d {
+  color: rgba(255, 255, 255, 0.82);
+}
+
+.plan-daytab.is-today:not(.is-active) {
+  border-color: var(--accent);
+  color: var(--accent-strong);
+}
+
+/* ---------- 当日累计 ---------- */
+
+.plan-stats {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 8px;
+}
+
+.plan-stat {
+  padding: 9px 8px;
+  border-radius: 12px;
+  border: 1px solid var(--line);
+  background: var(--card);
+  text-align: center;
+}
+
+.plan-stat b {
+  display: block;
+  font-size: 17px;
+  font-weight: 700;
+  color: var(--ink);
+  font-variant-numeric: tabular-nums;
+  line-height: 1.25;
+}
+
+.plan-stat span {
+  display: block;
+  margin-top: 2px;
+  font-size: 11px;
+  color: var(--faint);
+  line-height: 1.35;
+}
+
+/* ---------- 五餐卡片 ---------- */
+
+.plan-meals {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.plan-meal {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  width: 100%;
+  padding: 11px 12px;
+  border-radius: 14px;
+  border: 1px solid var(--line);
+  border-left: 3px solid var(--line-strong);
+  background: var(--card);
+  box-shadow: var(--shadow);
+  font: inherit;
+  color: inherit;
+  text-align: left;
+  -webkit-appearance: none;
+  appearance: none;
+  cursor: pointer;
+  transition: background 0.15s ease, border-color 0.15s ease, transform 0.12s ease;
+}
+
+.plan-meal:active {
+  transform: scale(0.995);
+}
+
+.plan-meal.is-done {
+  border-left-color: var(--green);
+  background: var(--green-soft);
+}
+
+.plan-check {
+  position: relative;
+  flex: 0 0 auto;
+  width: 19px;
+  height: 19px;
+  margin-top: 1px;
+  border-radius: 50%;
+  border: 2px solid var(--line-strong);
+  background: transparent;
+  transition: background 0.15s ease, border-color 0.15s ease;
+}
+
+.plan-meal.is-done .plan-check {
+  border-color: var(--green);
+  background: var(--green);
+}
+
+.plan-meal.is-done .plan-check::after {
+  content: "";
+  position: absolute;
+  left: 5px;
+  top: 2px;
+  width: 5px;
+  height: 9px;
+  border: solid #fff;
+  border-width: 0 2px 2px 0;
+  transform: rotate(45deg);
+}
+
+.plan-meal-main {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 0;
+  flex: 1 1 auto;
+}
+
+.plan-meal-head {
+  display: flex;
+  align-items: baseline;
+  gap: 7px;
+}
+
+.plan-meal-name {
+  font-size: 14.5px;
+  font-weight: 700;
+  color: var(--ink);
+}
+
+.plan-meal-time {
+  font-size: 12px;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.plan-meal-p {
+  margin-left: auto;
+  font-size: 11.5px;
+  font-weight: 600;
+  color: var(--accent-strong);
+  background: var(--accent-soft);
+  padding: 1px 7px;
+  border-radius: 999px;
+  white-space: nowrap;
+}
+
+.plan-meal.is-done .plan-meal-p {
+  color: var(--green);
+  background: transparent;
+}
+
+.plan-meal-items {
+  font-size: 13px;
+  line-height: 1.62;
+  color: var(--ink-2);
+}
+
+.plan-meal.is-done .plan-meal-items {
+  color: var(--faint);
+}
+
+/* ---------- 折叠区 ---------- */
+
+.plan-fold {
+  border-radius: 14px;
+  border: 1px solid var(--line);
+  background: var(--card);
+  box-shadow: var(--shadow);
+  overflow: hidden;
+}
+
+.plan-fold-sum {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 12px 14px;
+  min-height: 46px;
+  cursor: pointer;
+  list-style: none;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--ink);
+}
+
+.plan-fold-sum::-webkit-details-marker {
+  display: none;
+}
+
+.plan-fold-sum::after {
+  content: "›";
+  margin-left: 6px;
+  font-size: 17px;
+  line-height: 1;
+  color: var(--faint);
+  transition: transform 0.2s ease;
+}
+
+.plan-fold[open] .plan-fold-sum::after {
+  transform: rotate(90deg);
+}
+
+.plan-fold-title {
+  flex: 0 0 auto;
+}
+
+.plan-fold-sub {
+  margin-left: auto;
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--faint);
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+
+.plan-fold-note {
+  margin: 0;
+  padding: 0 14px 12px;
+  font-size: 12px;
+  color: var(--faint);
+  line-height: 1.6;
+}
+
+.plan-ex {
+  margin: 0;
+  padding: 0 14px 13px;
+  font-size: 13px;
+  line-height: 1.72;
+  color: var(--ink-2);
+}
+
+/* ---------- 饮水网格 ---------- */
+
+.plan-water {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 6px;
+  padding: 0 14px 12px;
+}
+
+.plan-water-item {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 4px;
+  padding: 6px 8px;
+  border-radius: 9px;
+  background: var(--blue-soft);
+}
+
+.plan-water-t {
+  font-size: 12px;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.plan-water-v {
+  font-size: 12.5px;
+  font-weight: 700;
+  color: var(--blue);
+  font-variant-numeric: tabular-nums;
+}
+
+/* ---------- 采购清单 ---------- */
+
+.plan-shop-group {
+  padding: 0 12px 6px;
+}
+
+.plan-shop-cat {
+  padding: 10px 2px 6px;
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--faint);
+  letter-spacing: 0.04em;
+}
+
+.plan-shop-row {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  width: 100%;
+  padding: 8px 4px;
+  border: 0;
+  border-bottom: 1px solid var(--line);
+  border-radius: 0;
+  background: transparent;
+  font: inherit;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+  -webkit-appearance: none;
+  appearance: none;
+}
+
+.plan-shop-group .plan-shop-row:last-child {
+  border-bottom: 0;
+}
+
+.plan-check-sm {
+  width: 15px;
+  height: 15px;
+  border-width: 1.5px;
+  margin-top: 0;
+}
+
+.plan-shop-row.is-bought .plan-check-sm {
+  border-color: var(--green);
+  background: var(--green);
+}
+
+.plan-shop-row.is-bought .plan-check-sm::after {
+  content: "";
+  position: absolute;
+  left: 4px;
+  top: 1px;
+  width: 4px;
+  height: 8px;
+  border: solid #fff;
+  border-width: 0 1.5px 1.5px 0;
+  transform: rotate(45deg);
+}
+
+.plan-shop-main {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  min-width: 0;
+  flex: 1 1 auto;
+}
+
+.plan-shop-name {
+  font-size: 13.5px;
+  color: var(--ink);
+}
+
+.plan-shop-note {
+  font-size: 11px;
+  color: var(--faint);
+}
+
+.plan-shop-qty {
+  flex: 0 0 auto;
+  font-size: 12.5px;
+  font-weight: 700;
+  color: var(--accent-strong);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.plan-shop-row.is-bought .plan-shop-name {
+  text-decoration: line-through;
+  color: var(--faint);
+}
+
+.plan-shop-row.is-bought .plan-shop-qty {
+  color: var(--faint);
+}
+
+/* ---------- 提示 ---------- */
+
+.plan-tip {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 12px 14px;
+  border-radius: 14px;
+  border: 1px solid var(--line);
+  border-left: 3px solid var(--orange);
+  background: var(--orange-soft);
+  font-size: 13px;
+  line-height: 1.68;
+  color: var(--ink-2);
+}
+
+.plan-tip b {
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--orange);
+  letter-spacing: 0.04em;
+}
+
+.plan-hint,
+.plan-empty {
+  margin: 0;
+  padding: 4px 2px 8px;
+  font-size: 12.5px;
+  color: var(--faint);
+  text-align: center;
+  line-height: 1.6;
+}
+
+.plan-meal:focus-visible,
+.plan-daytab:focus-visible,
+.plan-shop-row:focus-visible,
+.plan-fold-sum:focus-visible {
+  outline: 3px solid var(--focus-ring);
+  outline-offset: 2px;
+}
+
+@media (max-width: 380px) {
+  .plan-water {
+    grid-template-columns: repeat(2, 1fr);
+  }
+
+  .mode-btn {
+    font-size: 13px;
+    gap: 4px;
+  }
+
+  .mode-btn .mode-dot {
+    width: 6px;
+    height: 6px;
   }
 }
