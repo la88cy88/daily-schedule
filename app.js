@@ -33,8 +33,8 @@
 
   var STORAGE_KEY = "kaoyan-daily-schedule-v1";
   var STORAGE_VERSION = 4;
-  var MODES = ["daily", "menu", "water"];
-  var MODE_LABELS = { daily: "每日计划", menu: "每周菜单", water: "喝大水" };
+  var MODES = ["daily", "menu", "water", "preconcept"];
+  var MODE_LABELS = { daily: "每日计划", menu: "每周菜单", water: "喝大水", preconcept: "备孕" };
 
   /** 可选的分类（与 styles.css 的 .cat[data-cat] 一一对应） */
   var CATEGORIES = ["学习", "饮食", "饮水", "训练", "休息", "健康", "睡眠"];
@@ -139,6 +139,16 @@
     ["weight", "体重", "kg", 65],
     ["age", "年龄", "岁", 25]
   ];
+
+  /* ---------------- 备孕 90 天计划数据 ---------------- */
+
+  /** 由 备孕计划/export_plan.py 生成的 window.PLAN_DATA；缺失时该视图给出提示 */
+  var PLAN = (window.PLAN_DATA && window.PLAN_DATA.weeks && window.PLAN_DATA.weeks.length)
+    ? window.PLAN_DATA
+    : null;
+
+  /** 一天 5 餐的槽位（与 plan-data.js 的 meals[].k 对应） */
+  var PLAN_SLOTS = ["b", "s1", "l", "s2", "d"];
 
   /* ---------------- 日期 / 时间工具 ---------------- */
 
@@ -456,6 +466,10 @@
 
   /* ---------------- 状态 ---------------- */
 
+  function defaultPreconcept() {
+    return { done: {}, shop: {}, shopWeek: 1 };
+  }
+
   function defaultState() {
     return {
       version: STORAGE_VERSION,
@@ -464,7 +478,8 @@
       completed: { daily: {}, menu: {} },
       schedule: buildDefaultSchedule(),
       menu: buildDefaultMenu(),
-      water: defaultWater()
+      water: defaultWater(),
+      preconcept: defaultPreconcept()
     };
   }
 
@@ -498,6 +513,46 @@
       out.daily = Object.assign({}, out.daily, src.training);
     }
     /* src.rest 有意丢弃，不做映射 */
+    return out;
+  }
+
+  /**
+   * 备孕打卡数据：done 以"日期 → 已打卡餐次数组"存储（数组比对象省空间）。
+   * 任何字段损坏都退化为空，不影响其他视图。
+   */
+  function sanitizePreconcept(raw) {
+    var out = defaultPreconcept();
+    if (!raw || typeof raw !== "object") {
+      return out;
+    }
+    if (raw.done && typeof raw.done === "object") {
+      Object.keys(raw.done).forEach(function (k) {
+        var src = raw.done[k];
+        var map = {};
+        if (Array.isArray(src)) {
+          src.forEach(function (s) {
+            if (PLAN_SLOTS.indexOf(s) > -1) {
+              map[s] = 1;
+            }
+          });
+        } else if (src && typeof src === "object") {
+          PLAN_SLOTS.forEach(function (s) {
+            if (src[s]) {
+              map[s] = 1;
+            }
+          });
+        }
+        if (Object.keys(map).length) {
+          out.done[k] = map;
+        }
+      });
+    }
+    if (raw.shop && typeof raw.shop === "object") {
+      out.shop = Object.assign({}, raw.shop);
+    }
+    if (typeof raw.shopWeek === "number" && isFinite(raw.shopWeek)) {
+      out.shopWeek = raw.shopWeek;
+    }
     return out;
   }
 
@@ -536,6 +591,8 @@
       if (parsed.date !== today) {
         state.water.done = 0;
       }
+      // 备孕打卡：按日期存，跨日不需要清空
+      state.preconcept = sanitizePreconcept(parsed.preconcept);
     }
     return state;
   }
@@ -1492,6 +1549,331 @@
     listEl.appendChild(panel);
   }
 
+  /* ---------------- 渲染：备孕 90 天计划 ---------------- */
+
+  var planViewDay = null;   // null = 跟随今天；手动切某天后固定
+
+  function planDateObj(s) {
+    var p = String(s).split("-");
+    return new Date(Number(p[0]), Number(p[1]) - 1, Number(p[2]));
+  }
+
+  function planDaysBetween(a, b) {
+    var x = new Date(a.getFullYear(), a.getMonth(), a.getDate()).getTime();
+    var y = new Date(b.getFullYear(), b.getMonth(), b.getDate()).getTime();
+    return Math.round((y - x) / 86400000);
+  }
+
+  /** 今天是计划开始后的第几周（0 起） */
+  function planWeekIndex() {
+    if (!PLAN) { return 0; }
+    var d = planDaysBetween(planDateObj(PLAN.start), new Date());
+    return d < 0 ? 0 : Math.floor(d / 7);
+  }
+
+  function planWeekNo() {
+    return planWeekIndex() + 1;
+  }
+
+  function planDaysLeft() {
+    if (!PLAN) { return 0; }
+    return Math.max(0, planDaysBetween(new Date(), planDateObj(PLAN.end)));
+  }
+
+  /** 当前周的数据；本周方案还没生成时回退到最后一份 */
+  function planWeekData() {
+    var want = planWeekNo();
+    for (var i = 0; i < PLAN.weeks.length; i++) {
+      if (PLAN.weeks[i].n === want) {
+        return { week: PLAN.weeks[i], fallback: false };
+      }
+    }
+    return { week: PLAN.weeks[PLAN.weeks.length - 1], fallback: true };
+  }
+
+  function planTodayIndex() {
+    if (!PLAN) { return 0; }
+    var d = planDaysBetween(planDateObj(PLAN.start), new Date());
+    return d < 0 ? 0 : d % 7;
+  }
+
+  /** 第 n 周第 idx 天对应的真实日期（跨年也不会错） */
+  function planDayDate(week, idx) {
+    var s = planDateObj(PLAN.start);
+    return new Date(s.getFullYear(), s.getMonth(), s.getDate() + (week.n - 1) * 7 + idx);
+  }
+
+  function planKey(week, idx) {
+    return localDateKey(planDayDate(week, idx));
+  }
+
+  function planSelection() {
+    if (!PLAN) { return null; }
+    var wd = planWeekData();
+    var idx = planViewDay === null ? planTodayIndex() : planViewDay;
+    if (idx < 0 || idx > wd.week.days.length - 1) {
+      idx = 0;
+    }
+    return {
+      week: wd.week,
+      fallback: wd.fallback,
+      idx: idx,
+      day: wd.week.days[idx],
+      key: planKey(wd.week, idx)
+    };
+  }
+
+  function planDoneMap(key) {
+    return state.preconcept.done[key] || {};
+  }
+
+  function prunePlanDone() {
+    var keys = Object.keys(state.preconcept.done);
+    if (keys.length <= 45) { return; }
+    keys.sort();
+    while (keys.length > 45) {
+      delete state.preconcept.done[keys.shift()];
+    }
+  }
+
+  function togglePlanMeal(slot) {
+    var sel = planSelection();
+    var map = state.preconcept.done[sel.key] || {};
+    var turningOn = !map[slot];
+    if (turningOn) {
+      map[slot] = 1;
+      state.preconcept.done[sel.key] = map;
+    } else {
+      delete map[slot];
+      if (!Object.keys(map).length) {
+        delete state.preconcept.done[sel.key];
+      }
+    }
+    prunePlanDone();
+    persist();
+    playSound(turningOn ? "complete" : "uncomplete");
+    renderPreconcept();
+    renderProgress();
+  }
+
+  function togglePlanShop(name, row) {
+    var s = state.preconcept.shop;
+    var on = !s[name];
+    if (on) { s[name] = 1; } else { delete s[name]; }
+    persist();
+    row.classList.toggle("is-bought", on);
+    row.setAttribute("aria-pressed", on ? "true" : "false");
+  }
+
+  function el(tag, cls, text) {
+    var n = document.createElement(tag);
+    if (cls) { n.className = cls; }
+    if (text !== undefined && text !== null) { n.textContent = text; }
+    return n;
+  }
+
+  function makePlanMeal(meal, done) {
+    var btn = document.createElement("button");
+    btn.type = "button";
+    btn.className = "plan-meal" + (done ? " is-done" : "");
+    btn.dataset.slot = meal.k;
+    btn.setAttribute("aria-pressed", done ? "true" : "false");
+    btn.setAttribute("aria-label", meal.name + " " + meal.time + "，" + (done ? "已打卡" : "未打卡"));
+    btn.addEventListener("click", function () {
+      togglePlanMeal(meal.k);
+    });
+
+    var head = el("span", "plan-meal-head");
+    head.appendChild(el("span", "plan-meal-name", meal.name));
+    head.appendChild(el("span", "plan-meal-time", meal.time));
+    head.appendChild(el("span", "plan-meal-p", Math.round(meal.protein) + "g 蛋白"));
+
+    var main = el("span", "plan-meal-main");
+    main.appendChild(head);
+    main.appendChild(el("span", "plan-meal-items", meal.text));
+
+    btn.appendChild(el("span", "plan-check"));
+    btn.appendChild(main);
+    return btn;
+  }
+
+  function makePlanDayTab(week, i, active) {
+    var d = week.days[i];
+    var btn = document.createElement("button");
+    btn.type = "button";
+    btn.className = "plan-daytab" + (active ? " is-active" : "");
+    btn.dataset.day = String(i);
+    btn.setAttribute("aria-label", d.wd + " " + d.date);
+    if (planKey(week, i) === localDateKey()) {
+      btn.classList.add("is-today");
+    }
+    btn.appendChild(el("span", "plan-daytab-w", d.wd.replace("周", "")));
+    btn.appendChild(el("span", "plan-daytab-d", d.date.slice(3)));
+    btn.addEventListener("click", function () {
+      planViewDay = i;
+      renderPreconcept();
+      renderProgress();
+    });
+    return btn;
+  }
+
+  function makePlanFold(title, sub) {
+    var d = document.createElement("details");
+    d.className = "plan-fold";
+    var s = el("summary", "plan-fold-sum");
+    s.appendChild(el("span", "plan-fold-title", title));
+    if (sub) {
+      s.appendChild(el("span", "plan-fold-sub", sub));
+    }
+    d.appendChild(s);
+    return d;
+  }
+
+  function makePlanWaterFold(day, totalWater) {
+    var fold = makePlanFold("饮水时间表", totalWater + "ml · " + day.water.length + " 次");
+    var grid = el("div", "plan-water");
+    day.water.forEach(function (pair) {
+      var item = el("div", "plan-water-item");
+      item.appendChild(el("span", "plan-water-t", pair[0]));
+      item.appendChild(el("span", "plan-water-v", pair[1] + "ml"));
+      grid.appendChild(item);
+    });
+    fold.appendChild(grid);
+    fold.appendChild(el("p", "plan-fold-note",
+      day.train ? "运动日 20:00 训练前后另加 200ml。" : "非运动日，按上表 11 次分完，不要集中喝。"));
+    return fold;
+  }
+
+  function makePlanExerciseFold(day) {
+    var fold = makePlanFold("今日运动", day.ex + (day.train ? " · 运动日" : " · 非运动日"));
+    fold.appendChild(el("p", "plan-ex", day.exDetail));
+    return fold;
+  }
+
+  function makePlanShopFold(items) {
+    var fold = makePlanFold("本周采购清单", items.length + " 项");
+    var cats = [];
+    items.forEach(function (it) {
+      if (cats.indexOf(it.cat) === -1) { cats.push(it.cat); }
+    });
+    cats.forEach(function (cat) {
+      var group = el("div", "plan-shop-group");
+      group.appendChild(el("div", "plan-shop-cat", cat));
+      items.forEach(function (it) {
+        if (it.cat !== cat) { return; }
+        var row = document.createElement("button");
+        row.type = "button";
+        row.className = "plan-shop-row" + (state.preconcept.shop[it.name] ? " is-bought" : "");
+        row.setAttribute("aria-pressed", state.preconcept.shop[it.name] ? "true" : "false");
+        row.dataset.name = it.name;
+        row.appendChild(el("span", "plan-check plan-check-sm"));
+        var main = el("span", "plan-shop-main");
+        main.appendChild(el("span", "plan-shop-name", it.name));
+        if (it.note) {
+          main.appendChild(el("span", "plan-shop-note", it.note));
+        }
+        row.appendChild(main);
+        row.appendChild(el("span", "plan-shop-qty", it.qty));
+        row.addEventListener("click", function () {
+          togglePlanShop(it.name, row);
+        });
+        group.appendChild(row);
+      });
+      fold.appendChild(group);
+    });
+    return fold;
+  }
+
+  function renderPreconcept() {
+    var listEl = els.taskList;
+    listEl.textContent = "";
+
+    if (!PLAN) {
+      var empty = el("p", "plan-empty",
+        "还没有备孕计划数据。请把 plan-data.js 放到站点根目录后刷新。");
+      listEl.appendChild(empty);
+      return;
+    }
+
+    var sel = planSelection();
+    var day = sel.day;
+    var doneMap = planDoneMap(sel.key);
+    var todayKey = localDateKey();
+
+    // 每周采购勾选：换周自动清空
+    if (state.preconcept.shopWeek !== sel.week.n) {
+      state.preconcept.shop = {};
+      state.preconcept.shopWeek = sel.week.n;
+      persist();
+    }
+
+    /* 周次卡 */
+    var hero = el("section", "plan-hero");
+    var heroTop = el("div", "plan-hero-top");
+    heroTop.appendChild(el("span", "plan-week", "第 " + sel.week.n + " 周"));
+    heroTop.appendChild(el("span", "plan-left", "剩 " + planDaysLeft() + " 天"));
+    hero.appendChild(heroTop);
+    var trainDays = sel.week.days.filter(function (d) { return d.train; }).length;
+    hero.appendChild(el("div", "plan-hero-sub",
+      sel.week.days[0].date + " ~ " + sel.week.days[sel.week.days.length - 1].date +
+      " · 共 " + PLAN.totalWeeks + " 周 · 运动日 " + trainDays + " 天"));
+    if (sel.fallback) {
+      hero.appendChild(el("div", "plan-hero-warn",
+        "第 " + planWeekNo() + " 周的方案还没生成，当前显示第 " + sel.week.n + " 周。"));
+    }
+    listEl.appendChild(hero);
+
+    /* 星期切换 */
+    var tabs = el("div", "plan-days");
+    tabs.setAttribute("role", "tablist");
+    sel.week.days.forEach(function (d, i) {
+      tabs.appendChild(makePlanDayTab(sel.week, i, i === sel.idx));
+    });
+    listEl.appendChild(tabs);
+
+    /* 当日进度（按已打卡餐次累计） */
+    var got = { protein: 0, veg: 0, fruit: 0 };
+    day.meals.forEach(function (m) {
+      if (doneMap[m.k]) {
+        got.protein += m.protein;
+        got.veg += m.veg;
+        got.fruit += m.fruit;
+      }
+    });
+    var stats = el("div", "plan-stats");
+    [["蛋白", Math.round(got.protein), day.totals.protein, "g"],
+     ["蔬菜", got.veg, day.totals.veg, "g"],
+     ["水果", got.fruit, day.totals.fruit, "g"]].forEach(function (row) {
+      var box = el("div", "plan-stat");
+      box.appendChild(el("b", null, row[1] + row[3]));
+      box.appendChild(el("span", null, row[0] + " · 全日 " + row[2] + row[3]));
+      stats.appendChild(box);
+    });
+    listEl.appendChild(stats);
+
+    /* 五餐 */
+    var meals = el("div", "plan-meals");
+    day.meals.forEach(function (m) {
+      meals.appendChild(makePlanMeal(m, !!doneMap[m.k]));
+    });
+    listEl.appendChild(meals);
+
+    /* 折叠区 */
+    listEl.appendChild(makePlanExerciseFold(day));
+    listEl.appendChild(makePlanWaterFold(day, day.totals.water));
+    listEl.appendChild(makePlanShopFold(PLAN.shopping));
+
+    /* 当日提示 */
+    var tip = el("div", "plan-tip");
+    tip.appendChild(el("b", null, "当日提示"));
+    tip.appendChild(el("span", null, day.tip));
+    listEl.appendChild(tip);
+
+    if (todayKey !== sel.key && planViewDay !== null) {
+      listEl.appendChild(el("p", "plan-hint", "正在查看非当天安排，点最左侧日期可回到今天。"));
+    }
+  }
+
   /* ---------------- 渲染：进度 / 预告 / FAB / 编辑态 ---------------- */
 
   function renderProgress() {
@@ -1511,12 +1893,26 @@
       done = menuEatenCount();
       text = done + "/" + total;
       els.progressTrack.setAttribute("aria-label", "每周菜单进度（已吃餐次）");
-    } else {
+    } else if (state.mode === "water") {
       var plan = waterPlan(state.water);
       total = plan.cups;
       done = currentWaterDone(plan);
       text = done * WATER_STEP + "/" + plan.total + "ml";
       els.progressTrack.setAttribute("aria-label", "今日饮水进度（毫升）");
+    } else if (state.mode === "preconcept" && PLAN) {
+      var sel = planSelection();
+      var map = planDoneMap(sel.key);
+      total = sel.day.meals.length;
+      done = sel.day.meals.filter(function (m) {
+        return !!map[m.k];
+      }).length;
+      text = done + "/" + total;
+      els.progressTrack.setAttribute("aria-label", "备孕餐次打卡进度");
+    } else if (state.mode === "preconcept") {
+      total = 0;
+      done = 0;
+      text = "—";
+      els.progressTrack.setAttribute("aria-label", "备孕计划未加载");
     }
     var pct = total ? Math.round((done / total) * 100) : 0;
 
@@ -1620,7 +2016,7 @@
 
   /** 编辑按钮 / 编辑栏 的显隐与文案 */
   function renderEditUi() {
-    els.editBtn.hidden = false;
+    els.editBtn.hidden = state.mode === "preconcept";
     els.editBtn.setAttribute("aria-pressed", editing ? "true" : "false");
     els.editLabel.textContent = editing ? "完成" : "编辑";
     els.editBar.hidden = !editing;
@@ -1645,6 +2041,10 @@
       els.listHeading.textContent = editing ? "编辑本周菜单" : "本周菜单 · 28 餐次";
       renderMenu();
       renderMenuStates();
+    } else if (state.mode === "preconcept") {
+      els.nowCard.hidden = true;
+      els.listHeading.textContent = PLAN ? "备孕计划 · 第 " + planWeekNo() + " 周" : "备孕计划";
+      renderPreconcept();
     } else {
       els.nowCard.hidden = true;
       els.listHeading.textContent = editing ? "饮水资料 · 今日目标" : "今日饮水";
@@ -1770,6 +2170,13 @@
         if (addBtn) {
           window.ScheduleHaptics.attach(addBtn);
         }
+        return;
+      }
+
+      if (state.mode === "preconcept") {
+        els.taskList.querySelectorAll(".plan-meal").forEach(function (c) {
+          window.ScheduleHaptics.attach(c);
+        });
         return;
       }
 
@@ -2008,6 +2415,11 @@
     /* 只清空当前视图，不影响另外两个视图 */
     if (state.mode === "water") {
       state.water.done = 0;
+    } else if (state.mode === "preconcept") {
+      if (PLAN) {
+        delete state.preconcept.done[planSelection().key];
+      }
+      state.preconcept.shop = {};
     } else {
       state.completed[state.mode] = {};
     }
@@ -2170,7 +2582,26 @@
           total: plan.total, cups: plan.cups
         };
       },
-      menuTotal: MENU_TOTAL
+      menuTotal: MENU_TOTAL,
+      plan: function () {
+        if (!PLAN) { return null; }
+        var sel = planSelection();
+        var map = planDoneMap(sel.key);
+        return {
+          week: sel.week.n,
+          fallback: sel.fallback,
+          dayIndex: sel.idx,
+          dayKey: sel.key,
+          weekday: sel.day.wd,
+          meals: sel.day.meals.map(function (m) {
+            return { k: m.k, name: m.name, protein: m.protein, done: !!map[m.k] };
+          }),
+          shopping: PLAN.shopping.length,
+          shopBought: Object.keys(state.preconcept.shop).length,
+          daysLeft: planDaysLeft()
+        };
+      },
+      setPlanDay: function (i) { planViewDay = i; renderAll(); }
     };
   }
 
